@@ -1,0 +1,20 @@
+services:
+  product-service:
+    image: node:24-alpine
+    working_dir: /app
+    volumes:
+      - ./product-service:/app
+      - /app/node_modules
+    command: sh -c "npm install --no-package-lock && npm start"
+    ports:
+      - "3001:3001"
+
+  customer-service:
+    image: node:24-alpine
+    working_dir: /app
+    volumes:
+      - ./customer-service:/app
+      - /app/node_modules
+    command: sh -c "npm install --no-package-lock && npm start"
+    ports:
+      - "3002:3002"
