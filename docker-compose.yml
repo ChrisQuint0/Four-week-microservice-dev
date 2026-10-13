@@ -7,12 +7,10 @@ services:
       - "3001:3001"
 
   customer-service:
-    image: node:24-alpine
-    working_dir: /app
-    volumes:
-      - ./customer-service:/app
-      - /app/node_modules
-    command: sh -c "npm install --no-package-lock && npm start"
+    build:
+      context: ./customer-service
+      dockerfile: dockerfile
+    init: true
     ports:
       - "3002:3002"
 
@@ -43,3 +41,14 @@ services:
       - product-service
     ports:
       - "3004:3004"
+
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: dockerfile
+    environment:
+      ORDER_SERVICE_URL: http://order-service:3004
+    depends_on:
+      - order-service
+    ports:
+      - "3005:3005"
