@@ -1,11 +1,8 @@
 services:
   product-service:
-    image: node:24-alpine
-    working_dir: /app
-    volumes:
-      - ./product-service:/app
-      - /app/node_modules
-    command: sh -c "npm install --no-package-lock && npm start"
+    build:
+      context: ./product-service
+      dockerfile: dockerfile
     ports:
       - "3001:3001"
 
@@ -18,3 +15,31 @@ services:
     command: sh -c "npm install --no-package-lock && npm start"
     ports:
       - "3002:3002"
+
+  cart-service:
+    build:
+      context: ./cart-service
+      dockerfile: dockerfile
+    environment:
+      CUSTOMER_SERVICE_URL: http://customer-service:3002
+      PRODUCT_SERVICE_URL: http://product-service:3001
+    depends_on:
+      - customer-service
+      - product-service
+    ports:
+      - "3003:3003"
+
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: dockerfile
+    environment:
+      CUSTOMER_SERVICE_URL: http://customer-service:3002
+      CART_SERVICE_URL: http://cart-service:3003
+      PRODUCT_SERVICE_URL: http://product-service:3001
+    depends_on:
+      - customer-service
+      - cart-service
+      - product-service
+    ports:
+      - "3004:3004"

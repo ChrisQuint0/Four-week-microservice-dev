@@ -1,11 +1,16 @@
 # E-commerce Platform Services
 
-This repository contains two Node.js and Express services:
+This repository contains Node.js and Express services:
 
 - **Product Catalog** (`product-service`): product details and stock quantities.
 - **Customer Service** (`customer-service`): customer profiles.
+- **Shopping Cart** (`cart-service`): stores customer carts and validates
+  customers and products against the other services.
+- **Order Service** (`order-service`): creates and tracks orders using verified
+  customers, carts, and catalog prices.
 
-Both services currently store data in memory. Seed records are restored when a service restarts; changes made through the API are not persisted.
+All service data is held in memory. Product and customer seed records are
+restored on restart; carts and orders are lost when their services restart.
 
 ## Requirements
 
@@ -19,16 +24,27 @@ From the repository root, run:
 docker compose up
 ```
 
-On the first run, Docker downloads the `node:24-alpine` image and each service installs its npm dependencies. The source folders are mounted into the containers, so code changes are available without building custom images. No Dockerfiles are currently used.
+On the first run, Docker builds the Product Catalog, Shopping Cart, and Order
+Service images from their service Dockerfiles and downloads the `node:24-alpine`
+image for the Customer Service, which mounts its source folder and installs
+dependencies at startup.
 
-Run in the background with `docker compose up -d`. View service output with `docker compose logs -f`, and stop/remove the containers with `docker compose down`.
+Use `docker compose up --build` after changing files in Product Catalog,
+Shopping Cart, or Order Service so their images are rebuilt. Run in the background with
+`docker compose up -d --build`. View service output with
+`docker compose logs -f`, and stop/remove the containers with
+`docker compose down`.
 
 | Service          | Base URL                | Health check  |
 | ---------------- | ----------------------- | ------------- |
 | Product Catalog  | `http://localhost:3001` | `GET /health` |
 | Customer Service | `http://localhost:3002` | `GET /health` |
+| Shopping Cart    | `http://localhost:3003` | `GET /health` |
+| Order Service    | `http://localhost:3004` | `GET /health` |
 
-The host ports `3001` and `3002` must be available. If Compose reports that a port is already in use, stop the local process using it or change the host-side port in `docker-compose.yml`.
+The host ports `3001` through `3004` must be available. If Compose reports that
+a port is already in use, stop the local process using it or change the
+host-side port in `docker-compose.yml`.
 
 ## Run Locally
 
@@ -49,6 +65,30 @@ cd customer-service
 npm install
 npm start
 ```
+
+Shopping Cart:
+
+```powershell
+cd cart-service
+npm install
+npm start
+```
+
+The cart service uses `CUSTOMER_SERVICE_URL` and `PRODUCT_SERVICE_URL` to locate
+the customer and product services; defaults are `http://localhost:3002` and
+`http://localhost:3001`.
+
+Order Service:
+
+```powershell
+cd order-service
+npm install
+npm start
+```
+
+The order service uses `CUSTOMER_SERVICE_URL`, `CART_SERVICE_URL`, and
+`PRODUCT_SERVICE_URL` to locate its dependencies; defaults are
+`http://localhost:3002`, `http://localhost:3003`, and `http://localhost:3001`.
 
 ## API Routes
 
@@ -96,5 +136,64 @@ Example customer request:
   "email": "jamie.reyes@example.test"
 }
 ```
+
+### Shopping Cart
+
+| Method   | Route            | Description                       |
+| -------- | ---------------- | --------------------------------- |
+| `GET`    | `/health`        | Health check                      |
+| `GET`    | `/cart`          | List carts                        |
+| `GET`    | `/cart/:id`      | Retrieve a cart                   |
+| `POST`   | `/cart`          | Create a cart                     |
+| `PUT`    | `/cart/:id`      | Update a cart (partial updates)   |
+| `DELETE` | `/cart/:id`      | Delete a cart                     |
+| `POST`   | `/cart/:id/items` | Add an item to a cart             |
+
+Example cart request:
+
+```json
+{
+  "id": "cart-001",
+  "customerId": "cust-001",
+  "items": [
+    { "productId": "prod-001", "quantity": 2 },
+    { "productId": "prod-002", "quantity": 1 }
+  ]
+}
+```
+
+Cart creation and updates verify the customer and each referenced product
+through their services. Product names, prices, subtotals, and the cart total are
+looked up and calculated by the cart service; client-submitted prices and totals
+are ignored. Quantities must be positive integers. Cart validation does not
+reserve stock.
+
+### Order Service
+
+| Method   | Route         | Description                           |
+| -------- | ------------- | ------------------------------------- |
+| `GET`    | `/health`     | Health check                          |
+| `GET`    | `/orders`     | List orders                           |
+| `GET`    | `/orders/:id` | Retrieve an order                     |
+| `POST`   | `/orders`     | Place an order from a cart            |
+| `PUT`    | `/orders/:id` | Update the order status               |
+| `DELETE` | `/orders/:id` | Delete a test order                   |
+
+Example order request:
+
+```json
+{
+  "customerId": "cust-001",
+  "cartId": "cart-001"
+}
+```
+
+Order creation verifies the customer and cart, confirms the cart belongs to
+that customer, and re-fetches each product from Product Catalog to validate
+availability and calculate authoritative prices and totals. New orders start
+with status `PENDING`; permitted statuses are `PENDING`, `CONFIRMED`,
+`CANCELLED`, and `FAILED`. Inventory reservation, Payment, and Notification
+integrations are placeholders for later service work. Product availability is
+checked but stock is not reserved or decremented.
 
 Successful responses use a JSON envelope with `success`, `data` (when applicable), and `message`. Product IDs are the catalog's identifiers for use by other services; customer IDs identify customer profiles.
