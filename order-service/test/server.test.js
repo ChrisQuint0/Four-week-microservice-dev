@@ -3,6 +3,7 @@ const { after, before, describe, it } = require("node:test");
 const express = require("express");
 const axios = require("axios");
 const { createApp } = require("../server");
+const { createApp: createInventoryApp } = require("../../inventory-service/server");
 
 const customer = {
   id: "cust-001",
@@ -68,6 +69,7 @@ describe("Order Service integration", () => {
   let customerServer;
   let cartServer;
   let productServer;
+  let inventoryServer;
   let orderServer;
   let orderUrl;
   let createdOrderId;
@@ -105,11 +107,15 @@ describe("Order Service integration", () => {
     customerServer = await listen(customerApp);
     cartServer = await listen(cartApp);
     productServer = await listen(productApp);
+    inventoryServer = await listen(createInventoryApp({
+      productServiceUrl: `http://127.0.0.1:${productServer.address().port}`,
+    }));
     orderServer = await listen(
       createApp({
         customerServiceUrl: `http://127.0.0.1:${customerServer.address().port}`,
         cartServiceUrl: `http://127.0.0.1:${cartServer.address().port}`,
         productServiceUrl: `http://127.0.0.1:${productServer.address().port}`,
+        inventoryServiceUrl: `http://127.0.0.1:${inventoryServer.address().port}`,
       }),
     );
     orderUrl = `http://127.0.0.1:${orderServer.address().port}`;
@@ -119,6 +125,7 @@ describe("Order Service integration", () => {
     await Promise.all([
       close(orderServer),
       close(productServer),
+      close(inventoryServer),
       close(cartServer),
       close(customerServer),
     ]);
