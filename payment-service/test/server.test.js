@@ -209,7 +209,7 @@ describe("Payment Service integration", () => {
       axios.patch(`${paymentUrl}/payments/${paymentId}/status`, {
         status: "PAID",
       }),
-      (error) => error.response.status === 502,
+      (error) => error.response.status === 503,
     );
     failOrderUpdates = false;
 
@@ -240,7 +240,7 @@ describe("Payment Service integration", () => {
     );
   });
 
-  it("keeps failed payment status separate from order status", async () => {
+  it("fails the order before recording a failed payment", async () => {
     const created = await axios.post(`${paymentUrl}/payments`, {
       orderId: "ord-test-002",
     });
@@ -250,6 +250,6 @@ describe("Payment Service integration", () => {
     );
 
     assert.equal(updated.data.data.status, "FAILED");
-    assert.equal(orders["ord-test-002"].status, "PENDING");
+    assert.equal(orders["ord-test-002"].status, "FAILED");
   });
 });

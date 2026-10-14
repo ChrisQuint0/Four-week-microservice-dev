@@ -49,6 +49,18 @@ async function fetchServiceResource(url, serviceName) {
 
 function handleServiceError(error, response) {
   if (error instanceof ServiceRequestError) {
+    if (
+      error.serviceName === "Inventory" &&
+      [409, 422].includes(error.upstreamStatus)
+    ) {
+      return response.status(error.upstreamStatus).json({
+        success: false,
+        message:
+          typeof error.cause?.response?.data?.message === "string"
+            ? error.cause.response.data.message
+            : "Inventory could not complete the stock operation",
+      });
+    }
     if (error.upstreamStatus === 404) {
       return response.status(422).json({
         success: false,
@@ -56,7 +68,7 @@ function handleServiceError(error, response) {
       });
     }
 
-    if (error.upstreamStatus === undefined) {
+    if (error.upstreamStatus === undefined || error.upstreamStatus === 503) {
       return response.status(503).json({
         success: false,
         message: `${error.serviceName} service is unavailable`,
@@ -82,6 +94,8 @@ function createApp({
   cartServiceUrl = process.env.CART_SERVICE_URL || "http://localhost:3003",
   productServiceUrl =
     process.env.PRODUCT_SERVICE_URL || "http://localhost:3001",
+  inventoryServiceUrl =
+    process.env.INVENTORY_SERVICE_URL || "http://localhost:3006",
 } = {}) {
   const app = express();
   const seedOrders = [
@@ -178,6 +192,67 @@ function createApp({
       createdAt: new Date().toISOString(),
     };
   });
+  const updatingOrderIds = new Set();
+
+  async function updateInventory(order, action) {
+    const path =
+      action === "reserve"
+        ? "/inventory/reservations"
+        : `/inventory/reservations/${encodeURIComponent(order.id)}/${action}`;
+    const items = order.items.map(({ productId, quantity }) => ({
+      productId,
+      quantity,
+    }));
+    let result;
+    // Inventory actions are idempotent by order ID. Retry a lost response
+    // once using the same ID, so a retry never deducts stock twice.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        result = await axios.post(
+          `${inventoryServiceUrl}${path}`,
+          action === "reserve" ? { orderId: order.id, items } : {},
+          { timeout: requestTimeout },
+        );
+        break;
+      } catch (error) {
+        if (!axios.isAxiosError(error)) {
+          throw error;
+        }
+        const status = error.response?.status;
+        if (attempt === 0 && (status === undefined || status >= 500)) {
+          continue;
+        }
+        throw new ServiceRequestError("Inventory", status, error);
+      }
+    }
+
+    const reservation = result.data?.data;
+    const expectedStatus = {
+      reserve: "RESERVED",
+      commit: "COMMITTED",
+      release: "RELEASED",
+    }[action];
+    const expectedItems = new Map(
+      items.map((item) => [item.productId, item.quantity]),
+    );
+    if (
+      result.data?.success !== true ||
+      reservation?.orderId !== order.id ||
+      reservation.status !== expectedStatus ||
+      !Array.isArray(reservation.items) ||
+      reservation.items.length !== expectedItems.size ||
+      new Set(reservation.items.map((item) => item?.productId)).size !==
+        expectedItems.size ||
+      reservation.items.some(
+        (item) =>
+          !item ||
+          !expectedItems.has(item.productId) ||
+          expectedItems.get(item.productId) !== item.quantity,
+      )
+    ) {
+      throw new ServiceRequestError("Inventory", 502);
+    }
+  }
 
   app.use(express.json());
 
@@ -319,9 +394,7 @@ function createApp({
         typeof product.id !== "string" ||
         typeof product.name !== "string" ||
         !Number.isFinite(product.price) ||
-        product.price < 0 ||
-        !Number.isSafeInteger(product.stockQuantity) ||
-        product.stockQuantity < 0
+        product.price < 0
       ) {
         return response.status(502).json({
           success: false,
@@ -339,13 +412,6 @@ function createApp({
         return response.status(502).json({
           success: false,
           message: "Product service returned an unexpected product",
-        });
-      }
-
-      if (quantity > product.stockQuantity) {
-        return response.status(409).json({
-          success: false,
-          message: `Insufficient stock for product ${productId}`,
         });
       }
 
@@ -386,7 +452,25 @@ function createApp({
       createdAt: new Date().toISOString(),
     };
 
-    // TODO: Reserve or deduct inventory before the order can be confirmed.
+    try {
+      await updateInventory(order, "reserve");
+    } catch (error) {
+      // A lost or malformed response can hide a successful reservation.
+      // Attempt to release it before returning the original error.
+      if (error.upstreamStatus === undefined || error.upstreamStatus >= 500) {
+        try {
+          await updateInventory(order, "release");
+        } catch (cleanupError) {
+          if (cleanupError.upstreamStatus !== 404) {
+            console.error(
+              `Inventory cleanup required for ${order.id}:`, cleanupError,
+            );
+          }
+        }
+      }
+      return handleServiceError(error, response);
+    }
+
     // TODO: Submit this order ID and total to the Payment service.
     // TODO: Notify the customer with the customer and order IDs.
     orders.push(order);
@@ -397,7 +481,7 @@ function createApp({
     });
   });
 
-  app.put("/orders/:id", (request, response) => {
+  app.put("/orders/:id", async (request, response) => {
     const order = orders.find((item) => item.id === request.params.id);
     if (!order) {
       return response.status(404).json({
@@ -419,31 +503,78 @@ function createApp({
       });
     }
 
-    order.status = body.status;
-    return response.json({
-      success: true,
-      data: order,
-      message: "Order updated successfully",
-    });
+    if (updatingOrderIds.has(order.id)) {
+      return response.status(409).json({
+        success: false,
+        message: "Order is already being updated",
+      });
+    }
+    if (order.status === body.status) {
+      return response.json({
+        success: true,
+        data: order,
+        message: "Order status is unchanged",
+      });
+    }
+    if (order.status !== "PENDING") {
+      return response.status(409).json({
+        success: false,
+        message: "A completed order cannot change status",
+      });
+    }
+
+    updatingOrderIds.add(order.id);
+    try {
+      await updateInventory(
+        order, body.status === "CONFIRMED" ? "commit" : "release",
+      );
+      order.status = body.status;
+      return response.json({
+        success: true,
+        data: order,
+        message: "Order updated successfully",
+      });
+    } catch (error) {
+      return handleServiceError(error, response);
+    } finally {
+      updatingOrderIds.delete(order.id);
+    }
   });
 
-  app.delete("/orders/:id", (request, response) => {
-    const orderIndex = orders.findIndex(
+  app.delete("/orders/:id", async (request, response) => {
+    const order = orders.find(
       (item) => item.id === request.params.id,
     );
-    if (orderIndex === -1) {
+    if (!order) {
       return response.status(404).json({
         success: false,
         message: "Order not found",
       });
     }
 
-    const [order] = orders.splice(orderIndex, 1);
-    return response.json({
-      success: true,
-      data: order,
-      message: "Order deleted successfully",
-    });
+    if (updatingOrderIds.has(order.id)) {
+      return response.status(409).json({
+        success: false,
+        message: "Order is already being updated",
+      });
+    }
+    updatingOrderIds.add(order.id);
+    try {
+      if (order.status === "PENDING") {
+        await updateInventory(order, "release");
+      }
+      // Locate it again after the HTTP call; another order may have been deleted.
+      orders.splice(orders.indexOf(order), 1);
+      return response.json({
+        success: true,
+        data: order,
+        message: "Order deleted successfully",
+      });
+    } catch (error) {
+      return handleServiceError(error, response);
+    } finally {
+      updatingOrderIds.delete(order.id);
+    }
   });
 
   app.use((request, response) => {

@@ -63,13 +63,13 @@ async function fetchOrder(url) {
   return result.data.data;
 }
 
-async function confirmOrder(url, orderId) {
+async function updateOrderStatus(url, orderId, status) {
   let result;
 
   try {
     result = await axios.put(
       url,
-      { status: "CONFIRMED" },
+      { status },
       { timeout: requestTimeout },
     );
   } catch (error) {
@@ -85,7 +85,7 @@ async function confirmOrder(url, orderId) {
     result.data.data === null ||
     typeof result.data.data !== "object" ||
     result.data.data.id !== orderId ||
-    result.data.data.status !== "CONFIRMED"
+    result.data.data.status !== status
   ) {
     throw new OrderServiceError(502);
   }
@@ -93,6 +93,12 @@ async function confirmOrder(url, orderId) {
 
 function handleOrderServiceError(error, response) {
   if (error instanceof OrderServiceError) {
+    if (error.upstreamStatus === 409) {
+      return response.status(409).json({
+        success: false,
+        message: "Order status conflicts with the payment update",
+      });
+    }
     if (error.upstreamStatus === 404) {
       return response.status(422).json({
         success: false,
@@ -100,7 +106,7 @@ function handleOrderServiceError(error, response) {
       });
     }
 
-    if (error.upstreamStatus === undefined) {
+    if (error.upstreamStatus === undefined || error.upstreamStatus === 503) {
       return response.status(503).json({
         success: false,
         message: "Order service is unavailable",
@@ -282,7 +288,7 @@ function createApp({
 
     updatingPaymentIds.add(payment.id);
     try {
-      if (body.status === "PAID") {
+      if (body.status === "PAID" || body.status === "FAILED") {
         let order;
         try {
           order = await fetchOrder(
@@ -298,20 +304,35 @@ function createApp({
             message: "Order service returned an invalid order",
           });
         }
-        if (order.status === "CANCELLED" || order.status === "FAILED") {
+        if (
+          body.status === "PAID" &&
+          (order.status === "CANCELLED" || order.status === "FAILED")
+        ) {
           return response.status(409).json({
             success: false,
             message: "Payment cannot succeed for an inactive order",
           });
         }
 
-        try {
-          await confirmOrder(
-            `${orderServiceUrl}/orders/${encodeURIComponent(payment.orderId)}`,
-            payment.orderId,
-          );
-        } catch (error) {
-          return handleOrderServiceError(error, response);
+        if (body.status === "FAILED" && order.status === "CONFIRMED") {
+          return response.status(409).json({
+            success: false,
+            message: "Payment cannot fail for a confirmed order",
+          });
+        }
+
+        // Already cancelled/failed orders have released their reservation.
+        // A retry after a lost response can safely repeat the order update.
+        if (body.status === "PAID" || order.status === "PENDING") {
+          try {
+            await updateOrderStatus(
+              `${orderServiceUrl}/orders/${encodeURIComponent(payment.orderId)}`,
+              payment.orderId,
+              body.status === "PAID" ? "CONFIRMED" : "FAILED",
+            );
+          } catch (error) {
+            return handleOrderServiceError(error, response);
+          }
         }
       }
 
