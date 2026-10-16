@@ -12,6 +12,7 @@ This repository contains Node.js and Express services:
   authoritative order totals and updates orders after payment succeeds or fails.
 - **Inventory Service** (`inventory-service`): tracks stock availability and
   supports reserving, committing, and releasing stock for orders.
+  New Update
 
 All service data is held in memory. Each service restores its sample records
 on restart; changes and additional records are lost. Inventory reservations
@@ -176,15 +177,15 @@ Example customer request:
 
 ### Shopping Cart
 
-| Method   | Route            | Description                       |
-| -------- | ---------------- | --------------------------------- |
-| `GET`    | `/health`        | Health check                      |
-| `GET`    | `/cart`          | List carts                        |
-| `GET`    | `/cart/:id`      | Retrieve a cart                   |
-| `POST`   | `/cart`          | Create a cart                     |
-| `PUT`    | `/cart/:id`      | Update a cart (partial updates)   |
-| `DELETE` | `/cart/:id`      | Delete a cart                     |
-| `POST`   | `/cart/:id/items` | Add an item to a cart             |
+| Method   | Route             | Description                     |
+| -------- | ----------------- | ------------------------------- |
+| `GET`    | `/health`         | Health check                    |
+| `GET`    | `/cart`           | List carts                      |
+| `GET`    | `/cart/:id`       | Retrieve a cart                 |
+| `POST`   | `/cart`           | Create a cart                   |
+| `PUT`    | `/cart/:id`       | Update a cart (partial updates) |
+| `DELETE` | `/cart/:id`       | Delete a cart                   |
+| `POST`   | `/cart/:id/items` | Add an item to a cart           |
 
 Example cart request:
 
@@ -207,14 +208,14 @@ reserve stock.
 
 ### Order Service
 
-| Method   | Route         | Description                           |
-| -------- | ------------- | ------------------------------------- |
-| `GET`    | `/health`     | Health check                          |
-| `GET`    | `/orders`     | List orders                           |
-| `GET`    | `/orders/:id` | Retrieve an order                     |
-| `POST`   | `/orders`     | Place an order from a cart            |
-| `PUT`    | `/orders/:id` | Update the order status               |
-| `DELETE` | `/orders/:id` | Delete a test order                   |
+| Method   | Route         | Description                |
+| -------- | ------------- | -------------------------- |
+| `GET`    | `/health`     | Health check               |
+| `GET`    | `/orders`     | List orders                |
+| `GET`    | `/orders/:id` | Retrieve an order          |
+| `POST`   | `/orders`     | Place an order from a cart |
+| `PUT`    | `/orders/:id` | Update the order status    |
+| `DELETE` | `/orders/:id` | Delete a test order        |
 
 Example order request:
 
@@ -275,17 +276,17 @@ If the order/stock operation fails, payment remains pending for retry.
 
 ### Inventory Service
 
-| Method | Route | Description |
-| ------ | ----- | ----------- |
-| `GET` | `/health` | Health check |
-| `GET` | `/inventory` | List stock records |
-| `GET` | `/inventory/:productId` | Retrieve stock for a product |
-| `POST` | `/inventory` | Create stock for an existing catalog product |
-| `PATCH` | `/inventory/:productId` | Update stock on hand |
-| `POST` | `/inventory/reservations` | Reserve stock for an order reference |
-| `GET` | `/inventory/reservations/:orderId` | Retrieve a reservation |
-| `POST` | `/inventory/reservations/:orderId/commit` | Deduct reserved stock |
-| `POST` | `/inventory/reservations/:orderId/release` | Release reserved stock |
+| Method  | Route                                      | Description                                  |
+| ------- | ------------------------------------------ | -------------------------------------------- |
+| `GET`   | `/health`                                  | Health check                                 |
+| `GET`   | `/inventory`                               | List stock records                           |
+| `GET`   | `/inventory/:productId`                    | Retrieve stock for a product                 |
+| `POST`  | `/inventory`                               | Create stock for an existing catalog product |
+| `PATCH` | `/inventory/:productId`                    | Update stock on hand                         |
+| `POST`  | `/inventory/reservations`                  | Reserve stock for an order reference         |
+| `GET`   | `/inventory/reservations/:orderId`         | Retrieve a reservation                       |
+| `POST`  | `/inventory/reservations/:orderId/commit`  | Deduct reserved stock                        |
+| `POST`  | `/inventory/reservations/:orderId/release` | Release reserved stock                       |
 
 Inventory starts with 10 records (`inv-001` through `inv-010`) matching the
 catalog's product IDs and initial stock quantities. Each record contains
