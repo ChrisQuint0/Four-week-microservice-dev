@@ -65,3 +65,25 @@ services:
       - product-service
     ports:
       - "3006:3006"
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: dockerfile
+    environment:
+      CUSTOMER_SERVICE_URL: http://customer-service:3002
+    depends_on:
+      - customer-service
+    ports:
+      - "3007:3007"
+
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: dockerfile
+    environment:
+      CUSTOMER_SERVICE_URL: http://customer-service:3002
+    depends_on:
+      - customer-service
+    ports:
+      - "3008:3008"
