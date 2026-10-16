@@ -12,11 +12,14 @@ This repository contains Node.js and Express services:
   authoritative order totals and updates orders after payment succeeds or fails.
 - **Inventory Service** (`inventory-service`): tracks stock availability and
   supports reserving, committing, and releasing stock for orders.
-  New Update
-
+- **Notification Service** (`notification-service`): creates simulated order
+  confirmation notifications after validating the customer.
+- **Authentication Service** (`auth-service`): registers fictional accounts,
+  verifies credentials, and returns non-sensitive user profiles.
 All service data is held in memory. Each service restores its sample records
-on restart; changes and additional records are lost. Inventory reservations
-are also lost when Inventory Service restarts.
+on restart; changes and additional records are lost. Authentication accounts
+and notifications are also lost on restart. Inventory reservations are lost
+when Inventory Service restarts.
 
 Payment Service starts with 10 sample payments matching the sample orders.
 They are restored to their sample state whenever the service restarts.
@@ -33,11 +36,10 @@ From the repository root, run:
 docker compose up
 ```
 
-On the first run, Docker builds the Product Catalog, Customer, Shopping Cart,
-Order, Payment, and Inventory Service images from their service Dockerfiles.
+On the first run, Docker builds all eight service images from their service
+Dockerfiles.
 
-Use `docker compose up --build` after changing files in Product Catalog,
-Customer, Shopping Cart, Order, Payment, or Inventory Service so their images are
+Use `docker compose up --build` after changing any service so its image is
 rebuilt. Run in the background with `docker compose up -d --build`. View service output with
 `docker compose logs -f`, and stop/remove the containers with
 `docker compose down`.
@@ -54,8 +56,10 @@ each service to stop. To use a shorter per-container wait, run
 | Order Service     | `http://localhost:3004` | `GET /health` |
 | Payment Service   | `http://localhost:3005` | `GET /health` |
 | Inventory Service | `http://localhost:3006` | `GET /health` |
+| Notification Service | `http://localhost:3007` | `GET /health` |
+| Authentication Service | `http://localhost:3008` | `GET /health` |
 
-The host ports `3001` through `3006` must be available. If Compose reports that
+The host ports `3001` through `3008` must be available. If Compose reports that
 a port is already in use, stop the local process using it or change the
 host-side port in `docker-compose.yml`.
 
@@ -126,6 +130,28 @@ npm start
 
 The inventory service uses `PRODUCT_SERVICE_URL` to validate products when
 creating stock records; it defaults to `http://localhost:3001`.
+
+Notification Service:
+
+```powershell
+cd notification-service
+npm install
+npm start
+```
+
+Authentication Service:
+
+```powershell
+cd auth-service
+npm install
+npm start
+```
+
+Both services use `CUSTOMER_SERVICE_URL` to validate customer references; it
+defaults to `http://localhost:3002`. Authentication data and notifications are
+held in memory and reset when their service restarts. Passwords are stored as
+PBKDF2 hashes; login tokens are demo placeholders and are not suitable for
+production authentication.
 Run its integration tests with `npm test` from `inventory-service`.
 
 ## API Routes
