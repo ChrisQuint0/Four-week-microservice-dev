@@ -167,7 +167,8 @@ describe("Shopping Cart Service integration", () => {
     assert.equal(added.data.data.items[0].quantity, 5);
     assert.equal(added.data.data.items[0].subtotal, 2995);
 
-    const updated = await axios.put(`${cartUrl}/cart/test-cart-001`, {
+    const updated = await axios.put(`${cartUrl}/cart`, {
+      id: "test-cart-001",
       items: [{ productId: "prod-002", quantity: 2 }],
     });
     assert.equal(updated.data.data.customerId, "cust-001");
@@ -175,7 +176,9 @@ describe("Shopping Cart Service integration", () => {
   });
 
   it("deletes carts and returns not found for missing carts", async () => {
-    const deleted = await axios.delete(`${cartUrl}/cart/test-cart-001`);
+    const deleted = await axios.delete(`${cartUrl}/cart`, {
+      data: { id: "test-cart-001" },
+    });
     assert.equal(deleted.data.data.id, "test-cart-001");
 
     await assert.rejects(

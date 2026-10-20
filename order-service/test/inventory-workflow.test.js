@@ -85,7 +85,7 @@ async function withPlatform(run) {
     const requestOptions = { validateStatus: () => true };
     const post = (url, body = {}) => axios.post(url, body, requestOptions);
     const put = (orderId, status) => axios.put(
-      `${orderServiceUrl}/orders/${orderId}`, { status }, requestOptions,
+      `${orderServiceUrl}/orders`, { id: orderId, status }, requestOptions,
     );
     const stock = async (productId = "prod-001") =>
       (await axios.get(`${inventoryServiceUrl}/inventory/${productId}`)).data.data;
@@ -97,7 +97,7 @@ async function withPlatform(run) {
     const payment = async (orderId) =>
       (await post(`${paymentServiceUrl}/payments`, { orderId })).data.data;
     const paymentStatus = (paymentId, status) => axios.patch(
-      `${paymentServiceUrl}/payments/${paymentId}/status`, { status }, requestOptions,
+      `${paymentServiceUrl}/payments/status`, { id: paymentId, status }, requestOptions,
     );
     const cart = async (id, items) => {
       assert.equal((await post(`${cartServiceUrl}/cart`, {
@@ -148,7 +148,10 @@ describe("Order, Inventory, Cart, and Payment workflow", () => {
         assert.equal((await put(orderId, "CONFIRMED")).status, 409);
       }
       const orderId = (await checkout()).data.data.id;
-      const deleted = await axios.delete(`${orderServiceUrl}/orders/${orderId}`, requestOptions);
+      const deleted = await axios.delete(`${orderServiceUrl}/orders`, {
+        ...requestOptions,
+        data: { id: orderId },
+      });
       assert.equal(deleted.status, 200);
       assert.equal((await stock()).reservedQuantity, baseline.reservedQuantity);
     });
@@ -215,7 +218,10 @@ describe("Order, Inventory, Cart, and Payment workflow", () => {
       control.fail = "release";
       assert.equal((await paymentStatus(pay.id, "FAILED")).status, 503);
       assert.equal((await put(orderId, "CANCELLED")).status, 503);
-      assert.equal((await axios.delete(`${orderServiceUrl}/orders/${orderId}`, requestOptions)).status, 503);
+      assert.equal((await axios.delete(`${orderServiceUrl}/orders`, {
+        ...requestOptions,
+        data: { id: orderId },
+      })).status, 503);
       assert.equal((await order(orderId)).status, "PENDING");
       control.fail = null;
       assert.equal((await paymentStatus(pay.id, "FAILED")).status, 200);
@@ -290,7 +296,10 @@ describe("Order, Inventory, Cart, and Payment workflow", () => {
       control.delay = "commit";
       const results = await Promise.all([
         put(orderId, "CONFIRMED"), put(orderId, "CANCELLED"),
-        axios.delete(`${orderServiceUrl}/orders/${orderId}`, requestOptions),
+        axios.delete(`${orderServiceUrl}/orders`, {
+          ...requestOptions,
+          data: { id: orderId },
+        }),
       ]);
       assert.deepEqual(results.map((item) => item.status), [200, 409, 409]);
       assert.equal((await stock()).stockQuantity, baseline.stockQuantity - 2);

@@ -131,10 +131,17 @@ app.post("/customers", (request, response) => {
 });
 
 //Updates a customer
-app.put("/customers/:id", (request, response) => {
-  const customerIndex = customers.findIndex(
-    (item) => item.id === request.params.id,
-  );
+app.put("/customers", (request, response) => {
+  const body = request.body || {};
+  if (typeof body.id !== "string" || body.id.trim().length === 0) {
+    return response.status(400).json({
+      success: false,
+      message: "Customer update must include a non-empty id",
+    });
+  }
+
+  const id = body.id.trim();
+  const customerIndex = customers.findIndex((item) => item.id === id);
 
   if (customerIndex === -1) {
     return response.status(404).json({
@@ -145,8 +152,8 @@ app.put("/customers/:id", (request, response) => {
 
   const customer = {
     ...customers[customerIndex],
-    ...request.body,
-    id: request.params.id,
+    ...body,
+    id,
   };
 
   if (!isValidCustomer(customer)) {
@@ -165,9 +172,21 @@ app.put("/customers/:id", (request, response) => {
 });
 
 //Deletes a customer
-app.delete("/customers/:id", (request, response) => {
+app.delete("/customers", (request, response) => {
+  const body = request.body || {};
+  if (
+    Object.keys(body).length !== 1 ||
+    typeof body.id !== "string" ||
+    body.id.trim().length === 0
+  ) {
+    return response.status(400).json({
+      success: false,
+      message: "Customer deletion must include only a non-empty id",
+    });
+  }
+
   const customerIndex = customers.findIndex(
-    (item) => item.id === request.params.id,
+    (item) => item.id === body.id.trim(),
   );
 
   if (customerIndex === -1) {

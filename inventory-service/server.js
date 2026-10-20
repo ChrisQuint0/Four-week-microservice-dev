@@ -360,26 +360,30 @@ function createApp({
     });
   });
 
-  app.patch("/inventory/:productId", (request, response) => {
-    const record = inventory.find(
-      (item) => item.productId === request.params.productId,
-    );
-    if (!record) {
-      return response.status(404).json({
-        success: false,
-        message: "Inventory not found",
-      });
-    }
+  app.patch("/inventory", (request, response) => {
     const body = request.body || {};
     if (
-      Object.keys(body).length !== 1 ||
+      Object.keys(body).length !== 2 ||
+      typeof body.productId !== "string" ||
+      body.productId.trim().length === 0 ||
       !Object.hasOwn(body, "stockQuantity") ||
       !Number.isSafeInteger(body.stockQuantity) ||
       body.stockQuantity < 0
     ) {
       return response.status(400).json({
         success: false,
-        message: "Only a non-negative integer stockQuantity may be updated",
+        message:
+          "Inventory update must include a productId and non-negative integer stockQuantity",
+      });
+    }
+
+    const record = inventory.find(
+      (item) => item.productId === body.productId.trim(),
+    );
+    if (!record) {
+      return response.status(404).json({
+        success: false,
+        message: "Inventory not found",
       });
     }
     if (body.stockQuantity < record.reservedQuantity) {

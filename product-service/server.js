@@ -165,10 +165,17 @@ app.post("/products", (request, response) => {
 });
 
 //Updates a product
-app.put("/products/:id", (request, response) => {
-  const productIndex = products.findIndex(
-    (item) => item.id === request.params.id,
-  );
+app.put("/products", (request, response) => {
+  const body = request.body || {};
+  if (typeof body.id !== "string" || body.id.trim().length === 0) {
+    return response.status(400).json({
+      success: false,
+      message: "Product update must include a non-empty id",
+    });
+  }
+
+  const id = body.id.trim();
+  const productIndex = products.findIndex((item) => item.id === id);
 
   if (productIndex === -1) {
     return response.status(404).json({
@@ -179,8 +186,8 @@ app.put("/products/:id", (request, response) => {
 
   const product = {
     ...products[productIndex],
-    ...request.body,
-    id: request.params.id,
+    ...body,
+    id,
   };
   if (!isValidProduct(product)) {
     return response.status(400).json({
@@ -199,9 +206,21 @@ app.put("/products/:id", (request, response) => {
 });
 
 //Deletes a product
-app.delete("/products/:id", (request, response) => {
+app.delete("/products", (request, response) => {
+  const body = request.body || {};
+  if (
+    Object.keys(body).length !== 1 ||
+    typeof body.id !== "string" ||
+    body.id.trim().length === 0
+  ) {
+    return response.status(400).json({
+      success: false,
+      message: "Product deletion must include only a non-empty id",
+    });
+  }
+
   const productIndex = products.findIndex(
-    (item) => item.id === request.params.id,
+    (item) => item.id === body.id.trim(),
   );
 
   if (productIndex === -1) {

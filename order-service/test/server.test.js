@@ -269,20 +269,22 @@ describe("Order Service integration", () => {
     assert.equal(retrieved.data.data.id, createdOrderId);
 
     const updated = await axios.put(
-      `${orderUrl}/orders/${createdOrderId}`,
-      { status: "CONFIRMED" },
+      `${orderUrl}/orders`,
+      { id: createdOrderId, status: "CONFIRMED" },
     );
     assert.equal(updated.data.data.status, "CONFIRMED");
 
     await assert.rejects(
-      axios.put(`${orderUrl}/orders/${createdOrderId}`, {
+      axios.put(`${orderUrl}/orders`, {
+        id: createdOrderId,
         status: "PAID",
       }),
       (error) => error.response.status === 400,
     );
 
     await assert.rejects(
-      axios.put(`${orderUrl}/orders/${createdOrderId}`, {
+      axios.put(`${orderUrl}/orders`, {
+        id: createdOrderId,
         status: "CANCELLED",
         totalAmount: 0,
       }),
@@ -292,7 +294,8 @@ describe("Order Service integration", () => {
 
   it("deletes test orders and reports missing orders", async () => {
     const deleted = await axios.delete(
-      `${orderUrl}/orders/${createdOrderId}`,
+      `${orderUrl}/orders`,
+      { data: { id: createdOrderId } },
     );
     assert.equal(deleted.data.data.id, createdOrderId);
 

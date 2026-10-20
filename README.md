@@ -49,15 +49,15 @@ Compose sends a termination signal and normally waits up to 10 seconds for
 each service to stop. To use a shorter per-container wait, run
 `docker compose down --timeout 5`.
 
-| Service           | Base URL                | Health check  |
-| ----------------- | ----------------------- | ------------- |
-| Product Catalog   | `http://localhost:3001` | `GET /health` |
-| Customer Service  | `http://localhost:3002` | `GET /health` |
-| Shopping Cart     | `http://localhost:3003` | `GET /health` |
-| Order Service     | `http://localhost:3004` | `GET /health` |
-| Payment Service   | `http://localhost:3005` | `GET /health` |
-| Inventory Service | `http://localhost:3006` | `GET /health` |
-| Notification Service | `http://localhost:3007` | `GET /health` |
+| Service                | Base URL                | Health check  |
+| ---------------------- | ----------------------- | ------------- |
+| Product Catalog        | `http://localhost:3001` | `GET /health` |
+| Customer Service       | `http://localhost:3002` | `GET /health` |
+| Shopping Cart          | `http://localhost:3003` | `GET /health` |
+| Order Service          | `http://localhost:3004` | `GET /health` |
+| Payment Service        | `http://localhost:3005` | `GET /health` |
+| Inventory Service      | `http://localhost:3006` | `GET /health` |
+| Notification Service   | `http://localhost:3007` | `GET /health` |
 | Authentication Service | `http://localhost:3008` | `GET /health` |
 
 The host ports `3001` through `3008` must be available. If Compose reports that
@@ -157,6 +157,12 @@ Run its integration tests with `npm test` from `inventory-service`.
 
 ## API Routes
 
+For resource updates and deletions, send the resource ID in the JSON request
+body rather than in the URL. `PUT` updates keep the ID unchanged, and `DELETE`
+requests accept a body containing only `id`. `PATCH` update routes also include
+their selector in the body (`id`, or `productId` for inventory). GET routes
+that retrieve an individual resource continue to use IDs in the URL.
+
 ### Product Catalog
 
 | Method   | Route           | Description                                     |
@@ -165,8 +171,8 @@ Run its integration tests with `npm test` from `inventory-service`.
 | `GET`    | `/products`     | List products                                   |
 | `GET`    | `/products/:id` | Get a product                                   |
 | `POST`   | `/products`     | Create a product                                |
-| `PUT`    | `/products/:id` | Update a product (partial updates are accepted) |
-| `DELETE` | `/products/:id` | Delete a product                                |
+| `PUT`    | `/products`     | Update a product (partial updates are accepted) |
+| `DELETE` | `/products`     | Delete a product                                |
 
 Example product request:
 
@@ -181,6 +187,9 @@ Example product request:
 }
 ```
 
+Send `PUT /products` with the product `id` and any fields to update, or
+`DELETE /products` with `{"id":"prod-002"}`.
+
 ### Customer Service
 
 | Method   | Route            | Description                                      |
@@ -189,8 +198,8 @@ Example product request:
 | `GET`    | `/customers`     | List customers                                   |
 | `GET`    | `/customers/:id` | Get a customer                                   |
 | `POST`   | `/customers`     | Create a customer                                |
-| `PUT`    | `/customers/:id` | Update a customer (partial updates are accepted) |
-| `DELETE` | `/customers/:id` | Delete a customer                                |
+| `PUT`    | `/customers`     | Update a customer (partial updates are accepted) |
+| `DELETE` | `/customers`     | Delete a customer                                |
 
 Example customer request:
 
@@ -202,6 +211,9 @@ Example customer request:
 }
 ```
 
+Send `PUT /customers` with the customer `id` and any fields to update, or
+`DELETE /customers` with `{"id":"cust-002"}`.
+
 ### Shopping Cart
 
 | Method   | Route             | Description                     |
@@ -210,8 +222,8 @@ Example customer request:
 | `GET`    | `/cart`           | List carts                      |
 | `GET`    | `/cart/:id`       | Retrieve a cart                 |
 | `POST`   | `/cart`           | Create a cart                   |
-| `PUT`    | `/cart/:id`       | Update a cart (partial updates) |
-| `DELETE` | `/cart/:id`       | Delete a cart                   |
+| `PUT`    | `/cart`           | Update a cart (partial updates) |
+| `DELETE` | `/cart`           | Delete a cart                   |
 | `POST`   | `/cart/:id/items` | Add an item to a cart           |
 
 Example cart request:
@@ -227,6 +239,9 @@ Example cart request:
 }
 ```
 
+Include the cart `id` in the JSON body for `PUT /cart`; send
+`DELETE /cart` with `{"id":"cart-001"}` to delete a cart.
+
 Cart creation and updates verify the customer and each referenced product
 through their services. Product names, prices, subtotals, and the cart total are
 looked up and calculated by the cart service; client-submitted prices and totals
@@ -241,8 +256,8 @@ reserve stock.
 | `GET`    | `/orders`     | List orders                |
 | `GET`    | `/orders/:id` | Retrieve an order          |
 | `POST`   | `/orders`     | Place an order from a cart |
-| `PUT`    | `/orders/:id` | Update the order status    |
-| `DELETE` | `/orders/:id` | Delete a test order        |
+| `PUT`    | `/orders`     | Update the order status    |
+| `DELETE` | `/orders`     | Delete a test order        |
 
 Example order request:
 
@@ -252,6 +267,10 @@ Example order request:
   "cartId": "cart-001"
 }
 ```
+
+Update an order with `PUT /orders` and a body such as
+`{"id":"ord-001","status":"CANCELLED"}`. Delete one with `DELETE /orders`
+and `{"id":"ord-001"}`.
 
 Order creation verifies the customer and cart, confirms the cart belongs to
 that customer, and re-fetches each product from Product Catalog to validate
@@ -275,13 +294,13 @@ fails instead of silently accepting an inconsistent stock state.
 
 ### Payment Service
 
-| Method  | Route                  | Description                            |
-| ------- | ---------------------- | -------------------------------------- |
-| `GET`   | `/health`              | Health check                           |
-| `GET`   | `/payments`            | List simulated payments                |
-| `GET`   | `/payments/:id`        | Retrieve a payment                     |
-| `POST`  | `/payments`            | Create a payment for an existing order |
-| `PATCH` | `/payments/:id/status` | Update payment status                  |
+| Method  | Route              | Description                            |
+| ------- | ------------------ | -------------------------------------- |
+| `GET`   | `/health`          | Health check                           |
+| `GET`   | `/payments`        | List simulated payments                |
+| `GET`   | `/payments/:id`    | Retrieve a payment                     |
+| `POST`  | `/payments`        | Create a payment for an existing order |
+| `PATCH` | `/payments/status` | Update payment status                  |
 
 Create a payment by sending only the order ID:
 
@@ -300,6 +319,8 @@ or failed order can record a failed payment without changing its order status.
 A confirmed order cannot accept a failed payment. Payment and order statuses
 remain separate fields; completed payment statuses cannot be changed.
 If the order/stock operation fails, payment remains pending for retry.
+Update payment status with `PATCH /payments/status` and a body such as
+`{"id":"pay-001","status":"PAID"}`.
 
 ### Inventory Service
 
@@ -309,7 +330,7 @@ If the order/stock operation fails, payment remains pending for retry.
 | `GET`   | `/inventory`                               | List stock records                           |
 | `GET`   | `/inventory/:productId`                    | Retrieve stock for a product                 |
 | `POST`  | `/inventory`                               | Create stock for an existing catalog product |
-| `PATCH` | `/inventory/:productId`                    | Update stock on hand                         |
+| `PATCH` | `/inventory`                               | Update stock on hand                         |
 | `POST`  | `/inventory/reservations`                  | Reserve stock for an order reference         |
 | `GET`   | `/inventory/reservations/:orderId`         | Retrieve a reservation                       |
 | `POST`  | `/inventory/reservations/:orderId/commit`  | Deduct reserved stock                        |
@@ -335,9 +356,33 @@ Create stock after creating the corresponding product in Product Catalog:
 ```
 
 Stock quantities must be non-negative safe integers. IDs and product IDs must
-be unique. `PATCH /inventory/:productId` accepts only `stockQuantity`, which
-cannot be reduced below the quantity currently reserved. Reserved and available
-quantities are maintained by the server.
+be unique. `PATCH /inventory` requires `productId` and `stockQuantity`, and
+stock cannot be reduced below the quantity currently reserved. Reserved and
+available quantities are maintained by the server.
+
+### Notification Service
+
+| Method  | Route                   | Description                  |
+| ------- | ----------------------- | ---------------------------- |
+| `GET`   | `/health`               | Health check                 |
+| `GET`   | `/notifications`        | List notifications           |
+| `GET`   | `/notifications/:id`    | Retrieve a notification      |
+| `POST`  | `/notifications`        | Create an order confirmation |
+| `PATCH` | `/notifications/status` | Update notification status   |
+
+Update a notification with `PATCH /notifications/status` and a body such as
+`{"id":"notif-...","status":"SENT"}`.
+
+### Authentication Service
+
+| Method | Route        | Description                      |
+| ------ | ------------ | -------------------------------- |
+| `GET`  | `/health`    | Health check                     |
+| `POST` | `/register`  | Register an account              |
+| `POST` | `/login`     | Authenticate an account          |
+| `GET`  | `/users/:id` | Retrieve a non-sensitive profile |
+
+Authentication currently has no user update or delete endpoints.
 
 Example reservation request:
 
@@ -390,11 +435,12 @@ With all services running, use Postman to:
 2. `POST /orders` on port 3004 with `customerId: "cust-001"` and
    `cartId: "cart-001"`. Save the returned order ID. Two units are reserved.
 3. `POST /payments` on port 3005 with that `orderId`. Save the payment ID.
-4. `PATCH /payments/:id/status` with `{"status":"PAID"}`. The order becomes
+4. `PATCH /payments/status` with `{"id":"<payment-id>","status":"PAID"}`. The order becomes
    confirmed, stock on hand falls by two, and its reservation is committed.
 5. Repeat with a new order and `{"status":"FAILED"}` to verify stock is
    released without reducing stock on hand.
-6. Create another order and `PUT /orders/:id` with `{"status":"CANCELLED"}`
+6. Create another order and `PUT /orders` with
+   `{"id":"<order-id>","status":"CANCELLED"}`
    to verify cancellation also releases stock.
 
 Run the connected Cart/Order/Inventory/Payment tests with `npm test` from

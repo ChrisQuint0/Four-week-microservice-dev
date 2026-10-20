@@ -185,19 +185,25 @@ describe("Inventory Service integration", () => {
   });
 
   it("permits only valid stock updates that preserve reservations", async () => {
-    for (const body of [{ stockQuantity: -1 }, { stockQuantity: 1.5 },
-      { reservedQuantity: 0 }, { stockQuantity: 30, productId: "prod-other" }, {}]) {
-      await expectStatus(axios.patch(`${inventoryUrl}/inventory/prod-001`, body), 400);
+    for (const body of [{ productId: "prod-001", stockQuantity: -1 },
+      { productId: "prod-001", stockQuantity: 1.5 },
+      { productId: "prod-001", reservedQuantity: 0 },
+      { productId: "prod-001", stockQuantity: 30, reservedQuantity: 0 },
+      { productId: "prod-001", stockQuantity: 30, extra: true }, {}]) {
+      await expectStatus(axios.patch(`${inventoryUrl}/inventory`, body), 400);
     }
-    await expectStatus(axios.patch(`${inventoryUrl}/inventory/prod-001`, {
+    await expectStatus(axios.patch(`${inventoryUrl}/inventory`, {
+      productId: "prod-001",
       stockQuantity: 2,
     }), 409);
-    const updated = await axios.patch(`${inventoryUrl}/inventory/prod-001`, {
+    const updated = await axios.patch(`${inventoryUrl}/inventory`, {
+      productId: "prod-001",
       stockQuantity: 30,
     });
     assert.equal(updated.data.data.availableQuantity, 21);
     assert.equal(updated.data.data.reservedQuantity, 9);
-    await expectStatus(axios.patch(`${inventoryUrl}/inventory/prod-missing`, {
+    await expectStatus(axios.patch(`${inventoryUrl}/inventory`, {
+      productId: "prod-missing",
       stockQuantity: 2,
     }), 404);
   });

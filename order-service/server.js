@@ -481,25 +481,27 @@ function createApp({
     });
   });
 
-  app.put("/orders/:id", async (request, response) => {
-    const order = orders.find((item) => item.id === request.params.id);
-    if (!order) {
-      return response.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
-    }
-
+  app.put("/orders", async (request, response) => {
     const body = request.body || {};
     if (
-      Object.keys(body).length !== 1 ||
+      Object.keys(body).length !== 2 ||
+      typeof body.id !== "string" ||
+      body.id.trim().length === 0 ||
       !Object.hasOwn(body, "status") ||
       typeof body.status !== "string" ||
       !orderStatuses.has(body.status)
     ) {
       return response.status(400).json({
         success: false,
-        message: "Only a valid order status may be updated",
+        message: "Order update must include an id and a valid status",
+      });
+    }
+
+    const order = orders.find((item) => item.id === body.id.trim());
+    if (!order) {
+      return response.status(404).json({
+        success: false,
+        message: "Order not found",
       });
     }
 
@@ -541,10 +543,20 @@ function createApp({
     }
   });
 
-  app.delete("/orders/:id", async (request, response) => {
-    const order = orders.find(
-      (item) => item.id === request.params.id,
-    );
+  app.delete("/orders", async (request, response) => {
+    const body = request.body || {};
+    if (
+      Object.keys(body).length !== 1 ||
+      typeof body.id !== "string" ||
+      body.id.trim().length === 0
+    ) {
+      return response.status(400).json({
+        success: false,
+        message: "Order deletion must include only a non-empty id",
+      });
+    }
+
+    const order = orders.find((item) => item.id === body.id.trim());
     if (!order) {
       return response.status(404).json({
         success: false,

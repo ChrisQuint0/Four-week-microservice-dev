@@ -346,8 +346,16 @@ function createApp({
     }
   });
 
-  app.put("/cart/:id", async (request, response) => {
-    const cartIndex = carts.findIndex((item) => item.id === request.params.id);
+  app.put("/cart", async (request, response) => {
+    const body = request.body || {};
+    if (typeof body.id !== "string" || body.id.trim().length === 0) {
+      return response.status(400).json({
+        success: false,
+        message: "Cart update must include a non-empty id",
+      });
+    }
+
+    const cartIndex = carts.findIndex((item) => item.id === body.id.trim());
     if (cartIndex === -1) {
       return response.status(404).json({
         success: false,
@@ -356,7 +364,6 @@ function createApp({
     }
 
     const existingCart = carts[cartIndex];
-    const body = request.body || {};
     const customerId = Object.hasOwn(body, "customerId")
       ? body.customerId
       : existingCart.customerId;
@@ -407,8 +414,20 @@ function createApp({
     }
   });
 
-  app.delete("/cart/:id", (request, response) => {
-    const cartIndex = carts.findIndex((item) => item.id === request.params.id);
+  app.delete("/cart", (request, response) => {
+    const body = request.body || {};
+    if (
+      Object.keys(body).length !== 1 ||
+      typeof body.id !== "string" ||
+      body.id.trim().length === 0
+    ) {
+      return response.status(400).json({
+        success: false,
+        message: "Cart deletion must include only a non-empty id",
+      });
+    }
+
+    const cartIndex = carts.findIndex((item) => item.id === body.id.trim());
     if (cartIndex === -1) {
       return response.status(404).json({
         success: false,

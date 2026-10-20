@@ -67,11 +67,9 @@ async function updateOrderStatus(url, orderId, status) {
   let result;
 
   try {
-    result = await axios.put(
-      url,
-      { status },
-      { timeout: requestTimeout },
-    );
+    result = await axios.put(url, { id: orderId, status }, {
+      timeout: requestTimeout,
+    });
   } catch (error) {
     if (axios.isAxiosError(error)) {
       throw new OrderServiceError(error.response?.status, error);
@@ -242,25 +240,27 @@ function createApp({
     });
   });
 
-  app.patch("/payments/:id/status", async (request, response) => {
-    const payment = payments.find((item) => item.id === request.params.id);
-    if (!payment) {
-      return response.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
-    }
-
+  app.patch("/payments/status", async (request, response) => {
     const body = request.body || {};
     if (
-      Object.keys(body).length !== 1 ||
+      Object.keys(body).length !== 2 ||
+      typeof body.id !== "string" ||
+      body.id.trim().length === 0 ||
       !Object.hasOwn(body, "status") ||
       typeof body.status !== "string" ||
       !paymentStatuses.has(body.status)
     ) {
       return response.status(400).json({
         success: false,
-        message: "Only a valid payment status may be updated",
+        message: "Payment update must include an id and a valid status",
+      });
+    }
+
+    const payment = payments.find((item) => item.id === body.id.trim());
+    if (!payment) {
+      return response.status(404).json({
+        success: false,
+        message: "Payment not found",
       });
     }
 
@@ -326,7 +326,7 @@ function createApp({
         if (body.status === "PAID" || order.status === "PENDING") {
           try {
             await updateOrderStatus(
-              `${orderServiceUrl}/orders/${encodeURIComponent(payment.orderId)}`,
+              `${orderServiceUrl}/orders`,
               payment.orderId,
               body.status === "PAID" ? "CONFIRMED" : "FAILED",
             );

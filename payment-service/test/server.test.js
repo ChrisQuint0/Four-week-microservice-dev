@@ -87,12 +87,12 @@ describe("Payment Service integration", () => {
 
       return response.json({ success: true, data: order });
     });
-    orderApp.put("/orders/:id", (request, response) => {
+    orderApp.put("/orders", (request, response) => {
       if (failOrderUpdates) {
         return response.status(503).json({ success: false });
       }
 
-      const order = orders[request.params.id];
+      const order = orders[request.body.id];
       if (!order) {
         return response.status(404).json({ success: false });
       }
@@ -198,7 +198,8 @@ describe("Payment Service integration", () => {
     ).data.data.id;
 
     await assert.rejects(
-      axios.patch(`${paymentUrl}/payments/${paymentId}/status`, {
+      axios.patch(`${paymentUrl}/payments/status`, {
+        id: paymentId,
         status: "APPROVED",
       }),
       (error) => error.response.status === 400,
@@ -206,7 +207,8 @@ describe("Payment Service integration", () => {
 
     failOrderUpdates = true;
     await assert.rejects(
-      axios.patch(`${paymentUrl}/payments/${paymentId}/status`, {
+      axios.patch(`${paymentUrl}/payments/status`, {
+        id: paymentId,
         status: "PAID",
       }),
       (error) => error.response.status === 503,
@@ -220,20 +222,21 @@ describe("Payment Service integration", () => {
     assert.equal(orders["ord-test-paid"].status, "PENDING");
 
     const updated = await axios.patch(
-      `${paymentUrl}/payments/${paymentId}/status`,
-      { status: "PAID" },
+      `${paymentUrl}/payments/status`,
+      { id: paymentId, status: "PAID" },
     );
     assert.equal(updated.data.data.status, "PAID");
     assert.equal(orders["ord-test-paid"].status, "CONFIRMED");
 
     const unchanged = await axios.patch(
-      `${paymentUrl}/payments/${paymentId}/status`,
-      { status: "PAID" },
+      `${paymentUrl}/payments/status`,
+      { id: paymentId, status: "PAID" },
     );
     assert.equal(unchanged.data.data.status, "PAID");
 
     await assert.rejects(
-      axios.patch(`${paymentUrl}/payments/${paymentId}/status`, {
+      axios.patch(`${paymentUrl}/payments/status`, {
+        id: paymentId,
         status: "FAILED",
       }),
       (error) => error.response.status === 409,
@@ -245,8 +248,8 @@ describe("Payment Service integration", () => {
       orderId: "ord-test-002",
     });
     const updated = await axios.patch(
-      `${paymentUrl}/payments/${created.data.data.id}/status`,
-      { status: "FAILED" },
+      `${paymentUrl}/payments/status`,
+      { id: created.data.data.id, status: "FAILED" },
     );
 
     assert.equal(updated.data.data.status, "FAILED");
