@@ -15,26 +15,26 @@ docker compose up --build
 
 Wait until the services are listening. Their local base URLs are:
 
-| Service | Port | Base URL |
-| --- | ---: | --- |
+| Service         | Port | Base URL                |
+| --------------- | ---: | ----------------------- |
 | Product Catalog | 3001 | `http://localhost:3001` |
-| Customer | 3002 | `http://localhost:3002` |
-| Cart | 3003 | `http://localhost:3003` |
-| Order | 3004 | `http://localhost:3004` |
-| Payment | 3005 | `http://localhost:3005` |
-| Inventory | 3006 | `http://localhost:3006` |
-| Notification | 3007 | `http://localhost:3007` |
-| Authentication | 3008 | `http://localhost:3008` |
+| Customer        | 3002 | `http://localhost:3002` |
+| Cart            | 3003 | `http://localhost:3003` |
+| Order           | 3004 | `http://localhost:3004` |
+| Payment         | 3005 | `http://localhost:3005` |
+| Inventory       | 3006 | `http://localhost:3006` |
+| Notification    | 3007 | `http://localhost:3007` |
+| Authentication  | 3008 | `http://localhost:3008` |
 
 Create a Postman environment with:
 
-| Variable | Initial value |
-| --- | --- |
-| `customerId` | `cust-001` |
-| `productId` | `prod-001` |
-| `cartId` | Leave empty; save the generated cart ID |
-| `orderId` | Leave empty; save the generated order ID |
-| `paymentId` | Leave empty; save the generated payment ID |
+| Variable         | Initial value                                                 |
+| ---------------- | ------------------------------------------------------------- |
+| `customerId`     | `cust-001`                                                    |
+| `productId`      | `prod-001`                                                    |
+| `cartId`         | Leave empty; save the generated cart ID                       |
+| `orderId`        | Leave empty; save the generated order ID                      |
+| `paymentId`      | Leave empty; save the generated payment ID                    |
 | `notificationId` | Leave empty; save the automatically generated notification ID |
 
 Add `Content-Type: application/json` to requests with JSON bodies. The local
@@ -48,50 +48,50 @@ listed validation/not-found case, using disposable IDs or data where possible.
 IDs for updates and deletes are generally in the JSON body; individual GET
 routes continue to take IDs in the URL.
 
-| Service | Endpoint | Checks |
-| --- | --- | --- |
-| All services | `GET /health` | HTTP 200 and `success: true` |
-| Product | `GET /products` | HTTP 200; list includes sample products |
-| Product | `GET /products/:id` | Existing product returns 200; unknown ID returns 404 |
-| Product | `POST /products` | Valid product returns 201; duplicate ID returns 409; missing/invalid fields return 400 |
-| Product | `PUT /products` | Existing ID and valid updated fields return 200; unknown ID returns 404; invalid resulting record returns 400 |
-| Product | `DELETE /products` | Body contains only `id`; existing ID returns 200; unknown ID returns 404; malformed body returns 400 |
-| Customer | `GET /customers` | HTTP 200 and customer list |
-| Customer | `GET /customers/:id` | Existing customer returns 200; unknown ID returns 404 |
-| Customer | `POST /customers` | Public creation is disabled; expect 405. Registration is through Auth Service |
-| Customer | `PUT /customers` | Update name/email with body `id`; unknown ID returns 404; malformed or invalid fields return 400 |
-| Customer | `DELETE /customers` | Body contains only `id`; removes customer and linked Auth record; unknown ID returns 404 |
-| Cart | `GET /cart` | HTTP 200 and enriched cart list |
-| Cart | `GET /cart/:id` | Existing cart returns 200; unknown ID returns 404 |
-| Cart | `POST /cart` | Valid customer/items returns 201 with generated ID; supplied `id` or invalid input returns 400; unknown customer/product returns 422 |
-| Cart | `PUT /cart` | Body uses existing `id`; updates provided customer/items; invalid input returns 400; unknown cart returns 404 |
-| Cart | `DELETE /cart` | Body contains only `id`; success returns 200; unknown cart returns 404 |
-| Cart | `POST /cart/items` | Body requires cart `id`, `productId`, and positive integer `quantity`; missing/invalid values return 400, unknown cart 404, unknown product 422 |
-| Order | `GET /orders` | HTTP 200; list includes sample and newly created orders |
-| Order | `GET /orders/:id` | Existing order returns 200; unknown ID returns 404 |
-| Order | `POST /orders` | Body requires only `cartId`; successful checkout returns 201; invalid/missing cart ID returns 400; unknown cart or customer returns 422; insufficient stock returns 409 |
-| Order | `PUT /orders` | Body requires `id` and status `CONFIRMED`, `CANCELLED`, or `FAILED`; invalid values return 400; missing order returns 404; incompatible completed-order change returns 409 |
-| Order | `DELETE /orders` | Body contains only `id`; a pending order releases stock before deletion; missing order returns 404 |
-| Payment | `GET /payments` | HTTP 200 and payment list |
-| Payment | `GET /payments/:id` | Existing payment returns 200; unknown ID returns 404 |
-| Payment | `POST /payments` | Body contains only `orderId`; returns 201 with authoritative order amount; invalid request 400, unknown order 422, inactive or duplicate order 409 |
-| Payment | `PATCH /payments/status` | Body requires `id` and `PENDING`, `PAID`, or `FAILED`; invalid request 400, missing payment 404, invalid transition 409 |
-| Inventory | `GET /inventory` | HTTP 200 with stock, reserved, and available quantities |
-| Inventory | `GET /inventory/:productId` | Existing product returns 200; unknown product returns 404 |
-| Inventory | `POST /inventory` | Creates stock for an existing catalog product; success 201, invalid body 400, duplicate ID/product 409, unknown product 422 |
-| Inventory | `PATCH /inventory` | Body requires `productId` and non-negative integer `stockQuantity`; unknown product 404; cannot reduce stock below reserved amount (409) |
-| Inventory | `POST /inventory/reservations` | Internal checkout operation; valid `orderId` and non-empty `items` reserves all-or-none; invalid body 400, unknown inventory 422, insufficient stock 409 |
-| Inventory | `GET /inventory/reservations/:orderId` | Existing reservation returns 200; unknown reservation returns 404 |
-| Inventory | `POST /inventory/reservations/:orderId/commit` | Internal payment/order operation; reserved quantities are deducted from stock; missing reservation 404; incompatible completed reservation 409 |
-| Inventory | `POST /inventory/reservations/:orderId/release` | Internal cancellation/failure operation; releases reserved quantity without deducting stock; missing reservation 404; incompatible completed reservation 409 |
-| Notification | `GET /notifications` | HTTP 200 and notification list |
-| Notification | `GET /notifications/:id` | Existing notification returns 200; unknown ID returns 404 |
-| Notification | `POST /notifications` | Body requires `customerId` and `orderId`; validates customer/order; success 201 or returns existing notification for same order; invalid body 400, unknown/mismatched customer/order 422, unconfirmed order 409 |
-| Notification | `PATCH /notifications/status` | Body requires `id` and `CREATED`, `SENT`, or `FAILED`; invalid body 400, unknown ID 404 |
-| Auth | `POST /register` | Creates a Customer and linked account; valid request 201, malformed data 400, duplicate username/customer conflict 409 |
-| Auth | `POST /login` | Valid credentials return 200; malformed body 400; incorrect username/password 401 |
-| Auth | `GET /users/:id` | Returns a non-sensitive user profile; unknown ID 404 |
-| Auth | `PUT /users` | Body requires user `id` and one or more of username/password/role; invalid data 400, unknown user 404, duplicate username 409 |
+| Service      | Endpoint                                                                                                                              | Checks                                                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| All services | `GET /health`                                                                                                                         | HTTP 200 and `success: true`                                                                                                                                                                                    |
+| Product      | `GET /products`                                                                                                                       | HTTP 200; list includes sample products                                                                                                                                                                         |
+| Product      | `GET /products/:id`                                                                                                                   | Existing product returns 200; unknown ID returns 404                                                                                                                                                            |
+| Product      | `POST /products`                                                                                                                      | Valid product returns 201; duplicate ID returns 409; missing/invalid fields return 400                                                                                                                          |
+| Product      | `PUT /products`                                                                                                                       | Existing ID and valid updated fields return 200; unknown ID returns 404; invalid resulting record returns 400                                                                                                   |
+| Product      | `DELETE /products`                                                                                                                    | Body contains only `id`; existing ID returns 200; unknown ID returns 404; malformed body returns 400                                                                                                            |
+| Customer     | `GET /customers`                                                                                                                      | HTTP 200 and customer list                                                                                                                                                                                      |
+| Customer     | `GET /customers/:id`                                                                                                                  | Existing customer returns 200; unknown ID returns 404                                                                                                                                                           |
+| Customer     | `POST /customers`                                                                                                                     | Public creation is disabled; expect 405. Registration is through Auth Service                                                                                                                                   |
+| Customer     | `PUT /customers`                                                                                                                      | Update name/email with body `id`; unknown ID returns 404; malformed or invalid fields return 400                                                                                                                |
+| Customer     | `DELETE /customers`                                                                                                                   | Body contains only `id`; removes customer and linked Auth record; unknown ID returns 404                                                                                                                        |
+| Cart         | `GET /cart`                                                                                                                           | HTTP 200 and enriched cart list                                                                                                                                                                                 |
+| Cart         | `GET /cart/:id`                                                                                                                       | Existing cart returns 200; unknown ID returns 404                                                                                                                                                               |
+| Cart         | `POST /cart`                                                                                                                          | Valid customer/items returns 201 with generated ID; supplied `id` or invalid input returns 400; unknown customer/product returns 422                                                                            |
+| Cart         | `PUT /cart`                                                                                                                           | Body uses existing `id`; updates provided customer/items; invalid input returns 400; unknown cart returns 404                                                                                                   |
+| Cart         | `DELETE /cart`                                                                                                                        | Body contains only `id`; success returns 200; unknown cart returns 404                                                                                                                                          |
+| Cart         | `POST /cart/items`                                                                                                                    | Body requires cart `id`, `productId`, and positive integer `quantity`; missing/invalid values return 400, unknown cart 404, unknown product 422                                                                 |
+| Order        | `GET /orders`                                                                                                                         | HTTP 200; list includes sample and newly created orders                                                                                                                                                         |
+| Order        | `GET /orders/:id`                                                                                                                     | Existing order returns 200; unknown ID returns 404                                                                                                                                                              |
+| Order        | `POST /orders`                                                                                                                        | Body requires only `cartId`; successful checkout returns 201; invalid/missing cart ID returns 400; unknown cart or customer returns 422; insufficient stock returns 409                                         |
+| Order        | `PUT /orders`                                                                                                                         | Body requires `id` and status `CONFIRMED`, `CANCELLED`, or `FAILED`; invalid values return 400; missing order returns 404; incompatible completed-order change returns 409                                      |
+| Order        | `DELETE /orders`                                                                                                                      | Body contains only `id`; a pending order releases stock before deletion; missing order returns 404                                                                                                              |
+| Payment      | `GET /payments`                                                                                                                       | HTTP 200 and payment list                                                                                                                                                                                       |
+| Payment      | `GET /payments/:id`                                                                                                                   | Existing payment returns 200; unknown ID returns 404                                                                                                                                                            |
+| Payment      | `POST /payments`                                                                                                                      | Body contains only `orderId`; returns 201 with authoritative order amount; invalid request 400, unknown order 422, inactive or duplicate order 409                                                              |
+| Payment      | `PATCH /payments/status`                                                                                                              | Body requires `id` and `PENDING`, `PAID`, or `FAILED`; invalid request 400, missing payment 404, invalid transition 409                                                                                         |
+| Inventory    | `GET /inventory`                                                                                                                      | HTTP 200 with stock, reserved, and available quantities                                                                                                                                                         |
+| Inventory    | `GET /inventory/:productId`                                                                                                           | Existing product returns 200; unknown product returns 404                                                                                                                                                       |
+| Inventory    | `POST /inventory`                                                                                                                     | Creates stock for an existing catalog product; success 201, invalid body 400, duplicate ID/product 409, unknown product 422                                                                                     |
+| Inventory    | `PATCH /inventory`                                                                                                                    | Body requires `productId` and non-negative integer `stockQuantity`; unknown product 404; cannot reduce stock below reserved amount (409)                                                                        |
+| Inventory    | `POST /inventory/reservations` (NOT INCLUDED IN TESTING, AUTOMATIC ON ORDER POSTING)                                                  | Internal checkout operation; valid `orderId` and non-empty `items` reserves all-or-none; invalid body 400, unknown inventory 422, insufficient stock 409                                                        |
+| Inventory    | `GET /inventory/reservations/:orderId`                                                                                                | Existing reservation returns 200; unknown reservation returns 404                                                                                                                                               |
+| Inventory    | `POST /inventory/reservations/:orderId/commit` (NOT INCLUDED IN TESTING, THIS IS AUTO EXECUTED WHEN AN ORDER STATUS BECAME CONFIRMED) | Internal payment/order operation; reserved quantities are deducted from stock; missing reservation 404; incompatible completed reservation 409                                                                  |
+| Inventory    | `POST /inventory/reservations/:orderId/release` (NOT INCLUDED IN TESTING.)                                                            | Internal cancellation/failure operation; releases reserved quantity without deducting stock; missing reservation 404; incompatible completed reservation 409                                                    |
+| Notification | `GET /notifications`                                                                                                                  | HTTP 200 and notification list                                                                                                                                                                                  |
+| Notification | `GET /notifications/:id`                                                                                                              | Existing notification returns 200; unknown ID returns 404                                                                                                                                                       |
+| Notification | `POST /notifications` (NOT INCLUDED IN TESTING, THE NOTIFICATIONS IS AUTOMATICALLY POSTED WHEN THE STATUS OF A PAYMENT BECOMES PAID ) | Body requires `customerId` and `orderId`; validates customer/order; success 201 or returns existing notification for same order; invalid body 400, unknown/mismatched customer/order 422, unconfirmed order 409 |
+| Notification | `PATCH /notifications/status`                                                                                                         | Body requires `id` and `CREATED`, `SENT`, or `FAILED`; invalid body 400, unknown ID 404                                                                                                                         |
+| Auth         | `POST /register`                                                                                                                      | Creates a Customer and linked account; valid request 201, malformed data 400, duplicate username/customer conflict 409                                                                                          |
+| Auth         | `POST /login`                                                                                                                         | Valid credentials return 200; malformed body 400; incorrect username/password 401                                                                                                                               |
+| Auth         | `GET /users/:id`                                                                                                                      | Returns a non-sensitive user profile; unknown ID 404                                                                                                                                                            |
+| Auth         | `PUT /users`                                                                                                                          | Body requires user `id` and one or more of username/password/role; invalid data 400, unknown user 404, duplicate username 409                                                                                   |
 
 The internal `POST /internal/customers` and
 `DELETE /internal/users/customer/:customerId` routes are service-to-service
@@ -135,8 +135,7 @@ Test registration separately with `POST http://localhost:3008/register`:
 
 Expect HTTP 201. Auth Service creates the customer through Customer Service
 and returns generated `data.customerId` and `data.id`. Save them as
-`registeredCustomerId` and `userId`. Repeating the same username should return
-409. Retrieve the account with `GET http://localhost:3008/users/{{userId}}`;
+`registeredCustomerId` and `userId`. Repeating the same username should return 409. Retrieve the account with `GET http://localhost:3008/users/{{userId}}`;
 profiles must not expose a password, salt, or password hash.
 
 Test account updates with `PUT http://localhost:3008/users`:
@@ -318,6 +317,7 @@ pending for payment:
 
    Expect HTTP 200. The reservation becomes `RELEASED`, available quantity
    returns to the pre-checkout value, and stock on hand is unchanged.
+
 4. A completed order cannot transition to a different status (409).
 
 Also test deletion on a separate pending one-item order:
@@ -411,6 +411,7 @@ Notification direct-endpoint checks (use only separate test orders):
   Expect HTTP 201 and save `data.id`. Posting the same customer/order pair
   again returns HTTP 200 with the same notification instead of creating a
   duplicate.
+
 - `POST /notifications` requires both `customerId` and `orderId`; malformed
   fields return 400.
 - The customer must exist, the order must exist, and the customer must own
