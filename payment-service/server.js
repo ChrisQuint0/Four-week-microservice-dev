@@ -39,6 +39,13 @@ class OrderServiceError extends Error {
   }
 }
 
+class NotificationServiceError extends Error {
+  constructor(upstreamStatus, cause) {
+    super("Notification service request failed", { cause });
+    this.upstreamStatus = upstreamStatus;
+  }
+}
+
 async function fetchOrder(url) {
   let result;
 
@@ -89,6 +96,37 @@ async function updateOrderStatus(url, orderId, status) {
   }
 }
 
+async function createOrderNotification(url, customerId, orderId) {
+  let result;
+  try {
+    result = await axios.post(
+      url,
+      { customerId, orderId },
+      { timeout: requestTimeout },
+    );
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      throw new NotificationServiceError(error.response?.status, error);
+    }
+
+    throw error;
+  }
+
+  const notification = result.data?.data;
+  if (
+    result.data?.success !== true ||
+    notification === null ||
+    typeof notification !== "object" ||
+    typeof notification.id !== "string" ||
+    notification.customerId !== customerId ||
+    notification.orderId !== orderId ||
+    notification.type !== "ORDER_CONFIRMATION" ||
+    !["CREATED", "SENT", "FAILED"].includes(notification.status)
+  ) {
+    throw new NotificationServiceError(502);
+  }
+}
+
 function handleOrderServiceError(error, response) {
   if (error instanceof OrderServiceError) {
     if (error.upstreamStatus === 409) {
@@ -124,6 +162,28 @@ function handleOrderServiceError(error, response) {
   });
 }
 
+function handleNotificationServiceError(error, response) {
+  if (error instanceof NotificationServiceError) {
+    if (error.upstreamStatus === undefined || error.upstreamStatus === 503) {
+      return response.status(503).json({
+        success: false,
+        message: "Notification service is unavailable; retry the payment update",
+      });
+    }
+
+    return response.status(502).json({
+      success: false,
+      message: "Notification service could not create a valid order notification",
+    });
+  }
+
+  console.error("Unexpected notification request error in payment service:", error);
+  return response.status(500).json({
+    success: false,
+    message: "Payment notification could not be completed",
+  });
+}
+
 function isValidOrder(order, orderId) {
   return (
     order.id === orderId &&
@@ -136,6 +196,8 @@ function isValidOrder(order, orderId) {
 function createApp({
   orderServiceUrl =
     process.env.ORDER_SERVICE_URL || "http://localhost:3004",
+  notificationServiceUrl =
+    process.env.NOTIFICATION_SERVICE_URL || "http://localhost:3007",
 } = {}) {
   const app = express();
   const payments = samplePayments.map((payment) => ({ ...payment }));
@@ -332,6 +394,25 @@ function createApp({
             );
           } catch (error) {
             return handleOrderServiceError(error, response);
+          }
+        }
+
+        if (body.status === "PAID") {
+          if (typeof order.customerId !== "string" || !order.customerId.trim()) {
+            return response.status(502).json({
+              success: false,
+              message: "Order service returned an order without a valid customer",
+            });
+          }
+
+          try {
+            await createOrderNotification(
+              `${notificationServiceUrl}/notifications`,
+              order.customerId.trim(),
+              payment.orderId,
+            );
+          } catch (error) {
+            return handleNotificationServiceError(error, response);
           }
         }
       }

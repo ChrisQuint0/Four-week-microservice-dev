@@ -1,449 +1,457 @@
-# E-commerce Platform Services
+# E-Commerce Platform — Local API and Integration Testing Guide
 
-This repository contains Node.js and Express services:
+This README is the tester's guide for the eight-service local workflow. API
+Gateway is not part of this project setup. All data is held in memory; restarting
+a service resets its data to the sample state. Restart the full stack for a
+clean test run.
 
-- **Product Catalog** (`product-service`): product details and stock quantities.
-- **Customer Service** (`customer-service`): customer profiles.
-- **Shopping Cart** (`cart-service`): stores customer carts and validates
-  customers and products against the other services.
-- **Order Service** (`order-service`): creates and tracks orders using verified
-  customers, carts, catalog prices, and Inventory reservations.
-- **Payment Service** (`payment-service`): records simulated payments using
-  authoritative order totals and updates orders after payment succeeds or fails.
-- **Inventory Service** (`inventory-service`): tracks stock availability and
-  supports reserving, committing, and releasing stock for orders.
-- **Notification Service** (`notification-service`): creates simulated order
-  confirmation notifications after validating the customer.
-- **Authentication Service** (`auth-service`): registers fictional accounts,
-  verifies credentials, and returns non-sensitive user profiles.
-  New Update
+## 1. Start the services
 
-All service data is held in memory. Each service restores its sample records
-on restart; changes and additional records are lost. Inventory reservations
-are also lost when Inventory Service restarts.
+From the repository root, start all eight services:
 
-Payment Service starts with 10 sample payments matching the sample orders.
-They are restored to their sample state whenever the service restarts.
+```powershell
+docker compose up --build
+```
 
-## Requirements
+Wait until the services are listening. Their local base URLs are:
 
-- Docker Desktop with Docker Compose, or Node.js 24 or later to run locally.
+| Service | Port | Base URL |
+| --- | ---: | --- |
+| Product Catalog | 3001 | `http://localhost:3001` |
+| Customer | 3002 | `http://localhost:3002` |
+| Cart | 3003 | `http://localhost:3003` |
+| Order | 3004 | `http://localhost:3004` |
+| Payment | 3005 | `http://localhost:3005` |
+| Inventory | 3006 | `http://localhost:3006` |
+| Notification | 3007 | `http://localhost:3007` |
+| Authentication | 3008 | `http://localhost:3008` |
 
-## Run with Docker Compose
+Create a Postman environment with:
 
+| Variable | Initial value |
+| --- | --- |
+| `customerId` | `cust-001` |
+| `productId` | `prod-001` |
+| `cartId` | Leave empty; save the generated cart ID |
+| `orderId` | Leave empty; save the generated order ID |
+| `paymentId` | Leave empty; save the generated payment ID |
+| `notificationId` | Leave empty; save the automatically generated notification ID |
+
+Add `Content-Type: application/json` to requests with JSON bodies. The local
+services do not currently require an `Authorization` header. Use only fictional
+data and the demo credentials in this guide.
+
+## 2. Endpoint test checklist
+
+Run the healthy-path checks as part of the workflow below. Also exercise each
+listed validation/not-found case, using disposable IDs or data where possible.
+IDs for updates and deletes are generally in the JSON body; individual GET
+routes continue to take IDs in the URL.
+
+| Service | Endpoint | Checks |
+| --- | --- | --- |
+| All services | `GET /health` | HTTP 200 and `success: true` |
+| Product | `GET /products` | HTTP 200; list includes sample products |
+| Product | `GET /products/:id` | Existing product returns 200; unknown ID returns 404 |
+| Product | `POST /products` | Valid product returns 201; duplicate ID returns 409; missing/invalid fields return 400 |
+| Product | `PUT /products` | Existing ID and valid updated fields return 200; unknown ID returns 404; invalid resulting record returns 400 |
+| Product | `DELETE /products` | Body contains only `id`; existing ID returns 200; unknown ID returns 404; malformed body returns 400 |
+| Customer | `GET /customers` | HTTP 200 and customer list |
+| Customer | `GET /customers/:id` | Existing customer returns 200; unknown ID returns 404 |
+| Customer | `POST /customers` | Public creation is disabled; expect 405. Registration is through Auth Service |
+| Customer | `PUT /customers` | Update name/email with body `id`; unknown ID returns 404; malformed or invalid fields return 400 |
+| Customer | `DELETE /customers` | Body contains only `id`; removes customer and linked Auth record; unknown ID returns 404 |
+| Cart | `GET /cart` | HTTP 200 and enriched cart list |
+| Cart | `GET /cart/:id` | Existing cart returns 200; unknown ID returns 404 |
+| Cart | `POST /cart` | Valid customer/items returns 201 with generated ID; supplied `id` or invalid input returns 400; unknown customer/product returns 422 |
+| Cart | `PUT /cart` | Body uses existing `id`; updates provided customer/items; invalid input returns 400; unknown cart returns 404 |
+| Cart | `DELETE /cart` | Body contains only `id`; success returns 200; unknown cart returns 404 |
+| Cart | `POST /cart/items` | Body requires cart `id`, `productId`, and positive integer `quantity`; missing/invalid values return 400, unknown cart 404, unknown product 422 |
+| Order | `GET /orders` | HTTP 200; list includes sample and newly created orders |
+| Order | `GET /orders/:id` | Existing order returns 200; unknown ID returns 404 |
+| Order | `POST /orders` | Body requires only `cartId`; successful checkout returns 201; invalid/missing cart ID returns 400; unknown cart or customer returns 422; insufficient stock returns 409 |
+| Order | `PUT /orders` | Body requires `id` and status `CONFIRMED`, `CANCELLED`, or `FAILED`; invalid values return 400; missing order returns 404; incompatible completed-order change returns 409 |
+| Order | `DELETE /orders` | Body contains only `id`; a pending order releases stock before deletion; missing order returns 404 |
+| Payment | `GET /payments` | HTTP 200 and payment list |
+| Payment | `GET /payments/:id` | Existing payment returns 200; unknown ID returns 404 |
+| Payment | `POST /payments` | Body contains only `orderId`; returns 201 with authoritative order amount; invalid request 400, unknown order 422, inactive or duplicate order 409 |
+| Payment | `PATCH /payments/status` | Body requires `id` and `PENDING`, `PAID`, or `FAILED`; invalid request 400, missing payment 404, invalid transition 409 |
+| Inventory | `GET /inventory` | HTTP 200 with stock, reserved, and available quantities |
+| Inventory | `GET /inventory/:productId` | Existing product returns 200; unknown product returns 404 |
+| Inventory | `POST /inventory` | Creates stock for an existing catalog product; success 201, invalid body 400, duplicate ID/product 409, unknown product 422 |
+| Inventory | `PATCH /inventory` | Body requires `productId` and non-negative integer `stockQuantity`; unknown product 404; cannot reduce stock below reserved amount (409) |
+| Inventory | `POST /inventory/reservations` | Internal checkout operation; valid `orderId` and non-empty `items` reserves all-or-none; invalid body 400, unknown inventory 422, insufficient stock 409 |
+| Inventory | `GET /inventory/reservations/:orderId` | Existing reservation returns 200; unknown reservation returns 404 |
+| Inventory | `POST /inventory/reservations/:orderId/commit` | Internal payment/order operation; reserved quantities are deducted from stock; missing reservation 404; incompatible completed reservation 409 |
+| Inventory | `POST /inventory/reservations/:orderId/release` | Internal cancellation/failure operation; releases reserved quantity without deducting stock; missing reservation 404; incompatible completed reservation 409 |
+| Notification | `GET /notifications` | HTTP 200 and notification list |
+| Notification | `GET /notifications/:id` | Existing notification returns 200; unknown ID returns 404 |
+| Notification | `POST /notifications` | Body requires `customerId` and `orderId`; validates customer/order; success 201 or returns existing notification for same order; invalid body 400, unknown/mismatched customer/order 422, unconfirmed order 409 |
+| Notification | `PATCH /notifications/status` | Body requires `id` and `CREATED`, `SENT`, or `FAILED`; invalid body 400, unknown ID 404 |
+| Auth | `POST /register` | Creates a Customer and linked account; valid request 201, malformed data 400, duplicate username/customer conflict 409 |
+| Auth | `POST /login` | Valid credentials return 200; malformed body 400; incorrect username/password 401 |
+| Auth | `GET /users/:id` | Returns a non-sensitive user profile; unknown ID 404 |
+| Auth | `PUT /users` | Body requires user `id` and one or more of username/password/role; invalid data 400, unknown user 404, duplicate username 409 |
+
+The internal `POST /internal/customers` and
+`DELETE /internal/users/customer/:customerId` routes are service-to-service
+routes used by Auth and Customer Services. Test them through registration and
+customer deletion rather than treating them as public client APIs.
+
+## 3. Health checks
+
+Send `GET /health` to each base URL on ports 3001–3008. Every service should
+return HTTP 200 and `success: true`. Resolve any unavailable service before
+continuing.
+
+## 4. Authentication and customer setup
+
+Authentication Service starts with the fictional demo account. Test login
+using `POST http://localhost:3008/login`:
+
+```json
+{
+  "username": "alex_demo",
+  "password": "DemoOnly-123!"
+}
+```
+
+Expect HTTP 200. The response includes `userId`, `customerId: "cust-001"`,
+username, role, and a demo access token. Save the returned `customerId` as
+`customerId`; the demo token is a placeholder and is not required on other
+requests.
+
+Test registration separately with `POST http://localhost:3008/register`:
+
+```json
+{
+  "name": "Jamie Demo",
+  "email": "jamie.demo@example.test",
+  "username": "postman_demo",
+  "password": "DemoOnly-456!",
+  "role": "CUSTOMER"
+}
+```
+
+Expect HTTP 201. Auth Service creates the customer through Customer Service
+and returns generated `data.customerId` and `data.id`. Save them as
+`registeredCustomerId` and `userId`. Repeating the same username should return
+409. Retrieve the account with `GET http://localhost:3008/users/{{userId}}`;
+profiles must not expose a password, salt, or password hash.
+
+Test account updates with `PUT http://localhost:3008/users`:
+
+```json
+{
+  "id": "{{userId}}",
+  "username": "postman_demo_updated",
+  "password": "DemoOnly-789!",
+  "role": "ADMIN"
+}
+```
+
+Expect HTTP 200 with updated profile fields only. Passwords require at least
+eight characters and are re-hashed; roles are `CUSTOMER` or `ADMIN`.
+Usernames are unique case-insensitively. Verify login works with the new
+username/password and the previous credentials no longer work (401). Updating
+one or more of `username`, `password`, and `role` is supported.
+
+For Customer Service, test `GET http://localhost:3002/customers` and
+`GET http://localhost:3002/customers/cust-001`; expect HTTP 200 and
+`alex.santos@example.test` in the customer record. Direct
+`POST http://localhost:3002/customers` returns 405. Test customer updates with
+`PUT http://localhost:3002/customers`:
+
+```json
+{
+  "id": "{{registeredCustomerId}}",
+  "name": "Jamie Demo Updated",
+  "email": "jamie.updated@example.test"
+}
+```
+
+Expect HTTP 200. The ID is only a selector and cannot be changed. Deleting a
+customer with `DELETE http://localhost:3002/customers` and
+`{"id":"{{registeredCustomerId}}"}` also deletes its linked Auth account.
+Confirm the customer GET returns 404 and login for that account returns 401.
+Use a dedicated test registration; do not delete `cust-001`.
+
+## 5. Product Catalog
+
+Send `GET http://localhost:3001/products`. Expect HTTP 200 and sample product
+`prod-001` (Wireless Mouse, price 599, non-negative stock quantity).
+`GET http://localhost:3001/products/prod-001` retrieves its details.
+
+Test product creation with `POST http://localhost:3001/products`:
+
+```json
+{
+  "id": "prod-test-001",
+  "name": "Test Headphones",
+  "description": "Fictional test product",
+  "price": 1200,
+  "stockQuantity": 8,
+  "category": "Audio"
+}
+```
+
+Expect HTTP 201. The ID must be unique; a repeated ID returns 409. Product
+records require a non-empty ID/name, description and category strings, a
+non-negative finite price, and a non-negative integer stock quantity. Missing
+or invalid data returns 400.
+
+Update the test product with `PUT http://localhost:3001/products`, including
+its ID and any valid fields to change. Expect HTTP 200. Delete it using
+`DELETE http://localhost:3001/products` with `{"id":"prod-test-001"}` and
+expect HTTP 200. Unknown IDs return 404. Do not delete `prod-001` or `prod-002`
+before the integration flow.
+
+## 6. Cart
+
+Create a cart with `POST http://localhost:3003/cart`:
+
+```json
+{
+  "customerId": "cust-001",
+  "items": [{ "productId": "prod-001", "quantity": 2 }]
+}
+```
+
+The service generates the cart ID; do not send `id`. Expect HTTP 201 and save
+`data.id` as `cartId`. The response should include `unitPrice: 599`,
+`subtotal: 1198`, and `totalAmount: 1198`. Prices and totals come from Product
+Catalog, not from client-supplied values. Invalid customer/item/quantity data
+returns 400; unknown customer or product returns 422.
+
+Retrieve the cart with `GET http://localhost:3003/cart/{{cartId}}`; also test
+`GET http://localhost:3003/cart`. To add three more units of the same product,
+send `POST http://localhost:3003/cart/items`:
+
+```json
+{
+  "id": "{{cartId}}",
+  "productId": "prod-001",
+  "quantity": 3
+}
+```
+
+Expect HTTP 200. The service merges quantities, so the cart now has five
+`prod-001` units, subtotal `2995`, and total `2995`. It does not reserve stock.
+Try an unknown cart (404), unknown product (422), missing ID/product or
+non-positive/non-integer quantity (400). `PUT http://localhost:3003/cart`
+updates an existing cart using body `id` (and optional `customerId`/`items`);
+`DELETE http://localhost:3003/cart` accepts only `{"id":"{{cartId}}"}`.
+
+## 7. Orders and Inventory
+
+Record the current stock using
+`GET http://localhost:3006/inventory/prod-001`. Save
+`data.availableQuantity` as `availableBefore`. The sample starts with
+`stockQuantity: 25`, `reservedQuantity: 6`, and `availableQuantity: 19` for
+`prod-001`.
+
+Create an order from the cart with `POST http://localhost:3004/orders`:
+
+```json
+{
+  "cartId": "{{cartId}}"
+}
+```
+
+Only `cartId` is required; Order Service gets and validates the customer ID
+from the cart. Expect HTTP 201, save `data.id` as `orderId`, and verify:
+
+- `status` is `PENDING`, `customerId` is `cust-001`, and `cartId` matches.
+- `totalAmount` is `2995`; the five units use Product Catalog's price 599.
+- Inventory `availableQuantity` decreases by five, but `stockQuantity` remains
+  unchanged while the quantity is reserved.
+
+Retrieve the order with `GET http://localhost:3004/orders/{{orderId}}`, list
+orders with `GET http://localhost:3004/orders`, and inspect the reservation
+with `GET http://localhost:3006/inventory/reservations/{{orderId}}`. It must
+be `RESERVED`, reference the same order, and contain five `prod-001` units.
+
+Test order error handling:
+
+- `POST /orders` with `{}` returns 400.
+- `POST /orders` with `{"cartId":"cart-does-not-exist"}` returns 422 and
+  creates no order or reservation.
+- To test a cart with a missing customer, register a separate fictional
+  customer, create a cart for its returned customer ID, delete that customer
+  through `DELETE /customers`, and submit an order using that cart ID. Expect
+  422 (`Customer not found`); inventory should not be reserved.
+- An order with an unknown product is rejected with 422 and must not leave a
+  partial reservation.
+- A request exceeding available inventory returns 409 and must not reserve
+  any of its items.
+
+Inventory endpoint tests:
+
+- `GET /inventory` lists stock records and computed `availableQuantity`.
+- `GET /inventory/prod-001` retrieves stock; unknown product returns 404.
+- `POST /inventory` creates stock for a catalog product using
+  `{"id":"inv-test-001","productId":"prod-test-001","stockQuantity":8}`.
+  It returns 201; invalid input returns 400, duplicate ID/product 409, and
+  missing catalog product 422.
+- `PATCH /inventory` updates stock with
+  `{"productId":"prod-test-001","stockQuantity":10}`. It returns 200; invalid
+  values return 400, unknown product 404, and a value below reservations 409.
+- Reservation endpoints are used automatically by checkout/status updates.
+  Their direct API contract is in the endpoint checklist above. Verify
+  reservation GETs during checkout, cancellation, and payment tests.
+
+Test cancellation on a separate one-item cart/order so the main order remains
+pending for payment:
+
+1. Create another cart for `cust-001` containing one `prod-001`; save its
+   generated ID. Record inventory available quantity.
+2. Create an order with `POST /orders` and that cart ID. Save the new order
+   ID; available quantity decreases by one.
+3. Send `PUT http://localhost:3004/orders`:
+
+   ```json
+   {
+     "id": "{{cancelOrderId}}",
+     "status": "CANCELLED"
+   }
+   ```
+
+   Expect HTTP 200. The reservation becomes `RELEASED`, available quantity
+   returns to the pre-checkout value, and stock on hand is unchanged.
+4. A completed order cannot transition to a different status (409).
+
+Also test deletion on a separate pending one-item order:
+`DELETE http://localhost:3004/orders` with `{"id":"{{deleteOrderId}}"}`.
+Expect HTTP 200; its pending reservation is released before deletion,
+available stock is restored, and subsequent `GET /orders/{{deleteOrderId}}`
+returns 404. Do not delete the main order.
+
+## 8. Payments and automatic notifications
+
+Create a payment for the still-pending main order using
+`POST http://localhost:3005/payments`:
+
+```json
+{
+  "orderId": "{{orderId}}"
+}
+```
+
+Expect HTTP 201. Save `data.id` as `paymentId`. Amount is taken from Order
+Service (`2995`) and status starts `PENDING`; clients cannot choose amount.
+Verify with `GET http://localhost:3005/payments/{{paymentId}}` and list with
+`GET http://localhost:3005/payments`.
+
+Change its status with `PATCH http://localhost:3005/payments/status`:
+
+```json
+{
+  "id": "{{paymentId}}",
+  "status": "PAID"
+}
+```
+
+On success, verify all automated effects:
+
+1. Payment becomes `PAID`.
+2. Payment Service automatically updates the order to `CONFIRMED`.
+3. Order Service commits the inventory reservation; it becomes `COMMITTED`,
+   `reservedQuantity` falls, and stock on hand is reduced by five.
+4. Payment Service automatically `POST`s a confirmation to Notification
+   Service. No manual notification POST is needed for this order.
+
+Get notifications with `GET http://localhost:3007/notifications`, find the
+record for `{{orderId}}`, save its ID as `notificationId`, and verify its
+`customerId`, `orderId`, `type: "ORDER_CONFIRMATION"`, `status: "CREATED"`,
+and order-specific message. Retrieve it with
+`GET http://localhost:3007/notifications/{{notificationId}}`. To simulate
+delivery, send `PATCH http://localhost:3007/notifications/status`:
+
+```json
+{
+  "id": "{{notificationId}}",
+  "status": "SENT"
+}
+```
+
+Expect HTTP 200. `SENT` means the test updated the simulated notification
+record; this project does not send a real email or SMS.
+
+Retrying the same `PAID` status is idempotent and must not create a duplicate
+notification. Notification Service also returns the existing notification
+when the same order is posted again. If Notification Service is unavailable,
+the payment update returns 503 and the payment stays `PENDING` (the order may
+already be `CONFIRMED`). Restore Notification Service and retry the same
+`PAID` request; the order confirmation and notification creation are safe to
+retry.
+
+Payment negative checks:
+
+- Creating a payment for an unknown order returns 422.
+- Creating a payment for a cancelled/failed order or a second payment for the
+  same order returns 409.
+- Supplying amount or other extra fields to `POST /payments` returns 400.
+- Invalid status returns 400; unknown payment returns 404.
+- A failed payment for a pending order makes the order `FAILED` and releases
+  inventory. A failed payment for a confirmed order returns 409.
+- A completed payment cannot transition to the other completed status (409).
+
+Notification direct-endpoint checks (use only separate test orders):
+
+- Create a separate confirmed order that has not already generated its
+  automatic notification. Send `POST http://localhost:3007/notifications`:
+
+  ```json
+  {
+    "customerId": "cust-001",
+    "orderId": "{{confirmedTestOrderId}}"
+  }
+  ```
+
+  Expect HTTP 201 and save `data.id`. Posting the same customer/order pair
+  again returns HTTP 200 with the same notification instead of creating a
+  duplicate.
+- `POST /notifications` requires both `customerId` and `orderId`; malformed
+  fields return 400.
+- The customer must exist, the order must exist, and the customer must own
+  that order; unknown or mismatched resources return 422.
+- The order must be `CONFIRMED`; otherwise notification creation returns 409.
+- `PATCH /notifications/status` accepts only `CREATED`, `SENT`, or `FAILED`;
+  unknown IDs return 404 and invalid bodies/statuses return 400.
+
+## 9. Automated verification
+
+Install dependencies once in each service folder if not already installed.
 From the repository root, run:
 
 ```powershell
-docker compose up
+Push-Location auth-service; npm test; Pop-Location
+Push-Location cart-service; npm test; Pop-Location
+Push-Location inventory-service; npm test; Pop-Location
+Push-Location order-service; npm test; Pop-Location
+Push-Location payment-service; npm test; Pop-Location
+Push-Location notification-service; npm test; Pop-Location
 ```
 
-On the first run, Docker builds all eight service images from their service
-Dockerfiles.
-
-Use `docker compose up --build` after changing any service so its image is
-rebuilt. Run in the background with `docker compose up -d --build`. View service output with
-`docker compose logs -f`, and stop/remove the containers with
-`docker compose down`.
-
-Compose sends a termination signal and normally waits up to 10 seconds for
-each service to stop. To use a shorter per-container wait, run
-`docker compose down --timeout 5`.
-
-| Service                | Base URL                | Health check  |
-| ---------------------- | ----------------------- | ------------- |
-| Product Catalog        | `http://localhost:3001` | `GET /health` |
-| Customer Service       | `http://localhost:3002` | `GET /health` |
-| Shopping Cart          | `http://localhost:3003` | `GET /health` |
-| Order Service          | `http://localhost:3004` | `GET /health` |
-| Payment Service        | `http://localhost:3005` | `GET /health` |
-| Inventory Service      | `http://localhost:3006` | `GET /health` |
-| Notification Service   | `http://localhost:3007` | `GET /health` |
-| Authentication Service | `http://localhost:3008` | `GET /health` |
-
-The host ports `3001` through `3008` must be available. If Compose reports that
-a port is already in use, stop the local process using it or change the
-host-side port in `docker-compose.yml`.
-
-## Run Locally
-
-Run each service in a separate terminal from the repository root.
-
-Product Catalog:
-
-```powershell
-cd product-service
-npm install
-npm start
-```
-
-Customer Service:
-
-```powershell
-cd customer-service
-npm install
-npm start
-```
-
-Shopping Cart:
-
-```powershell
-cd cart-service
-npm install
-npm start
-```
-
-The cart service uses `CUSTOMER_SERVICE_URL` and `PRODUCT_SERVICE_URL` to locate
-the customer and product services; defaults are `http://localhost:3002` and
-`http://localhost:3001`.
-
-Order Service:
-
-```powershell
-cd order-service
-npm install
-npm start
-```
-
-The order service uses `CUSTOMER_SERVICE_URL`, `CART_SERVICE_URL`,
-`PRODUCT_SERVICE_URL`, and `INVENTORY_SERVICE_URL` to locate its dependencies;
-defaults are `http://localhost:3002`, `http://localhost:3003`,
-`http://localhost:3001`, and `http://localhost:3006`. Start Inventory before
-placing orders locally; Compose configures the service URLs and startup order.
-
-Payment Service:
-
-```powershell
-cd payment-service
-npm install
-npm start
-```
-
-The payment service uses `ORDER_SERVICE_URL` to locate Order Service; it
-defaults to `http://localhost:3004`.
-
-Inventory Service:
-
-```powershell
-cd inventory-service
-npm install
-npm start
-```
-
-The inventory service uses `PRODUCT_SERVICE_URL` to validate products when
-creating stock records; it defaults to `http://localhost:3001`.
-
-Notification Service:
-
-```powershell
-cd notification-service
-npm install
-npm start
-```
-
-Authentication Service:
-
-```powershell
-cd auth-service
-npm install
-npm start
-```
-
-Both services use `CUSTOMER_SERVICE_URL` to validate customer references; it
-defaults to `http://localhost:3002`. Authentication data and notifications are
-held in memory and reset when their service restarts. Passwords are stored as
-PBKDF2 hashes; login tokens are demo placeholders and are not suitable for
-production authentication.
-Run its integration tests with `npm test` from `inventory-service`.
-
-## API Routes
-
-For resource updates and deletions, send the resource ID in the JSON request
-body rather than in the URL. `PUT` updates keep the ID unchanged, and `DELETE`
-requests accept a body containing only `id`. `PATCH` update routes also include
-their selector in the body (`id`, or `productId` for inventory). GET routes
-that retrieve an individual resource continue to use IDs in the URL.
-
-### Product Catalog
-
-| Method   | Route           | Description                                     |
-| -------- | --------------- | ----------------------------------------------- |
-| `GET`    | `/health`       | Health check                                    |
-| `GET`    | `/products`     | List products                                   |
-| `GET`    | `/products/:id` | Get a product                                   |
-| `POST`   | `/products`     | Create a product                                |
-| `PUT`    | `/products`     | Update a product (partial updates are accepted) |
-| `DELETE` | `/products`     | Delete a product                                |
-
-Example product request:
-
-```json
-{
-  "id": "prod-002",
-  "name": "USB Keyboard",
-  "description": "Wired keyboard",
-  "price": 850,
-  "stockQuantity": 15,
-  "category": "Accessories"
-}
-```
-
-Send `PUT /products` with the product `id` and any fields to update, or
-`DELETE /products` with `{"id":"prod-002"}`.
-
-### Customer Service
-
-| Method   | Route            | Description                                      |
-| -------- | ---------------- | ------------------------------------------------ |
-| `GET`    | `/health`        | Health check                                     |
-| `GET`    | `/customers`     | List customers                                   |
-| `GET`    | `/customers/:id` | Get a customer                                   |
-| `POST`   | `/customers`     | Create a customer                                |
-| `PUT`    | `/customers`     | Update a customer (partial updates are accepted) |
-| `DELETE` | `/customers`     | Delete a customer                                |
-
-Example customer request:
-
-```json
-{
-  "id": "cust-002",
-  "name": "Jamie Reyes",
-  "email": "jamie.reyes@example.test"
-}
-```
-
-Send `PUT /customers` with the customer `id` and any fields to update, or
-`DELETE /customers` with `{"id":"cust-002"}`.
-
-### Shopping Cart
-
-| Method   | Route             | Description                     |
-| -------- | ----------------- | ------------------------------- |
-| `GET`    | `/health`         | Health check                    |
-| `GET`    | `/cart`           | List carts                      |
-| `GET`    | `/cart/:id`       | Retrieve a cart                 |
-| `POST`   | `/cart`           | Create a cart                   |
-| `PUT`    | `/cart`           | Update a cart (partial updates) |
-| `DELETE` | `/cart`           | Delete a cart                   |
-| `POST`   | `/cart/:id/items` | Add an item to a cart           |
-
-Example cart request:
-
-```json
-{
-  "id": "cart-001",
-  "customerId": "cust-001",
-  "items": [
-    { "productId": "prod-001", "quantity": 2 },
-    { "productId": "prod-002", "quantity": 1 }
-  ]
-}
-```
-
-Include the cart `id` in the JSON body for `PUT /cart`; send
-`DELETE /cart` with `{"id":"cart-001"}` to delete a cart.
-
-Cart creation and updates verify the customer and each referenced product
-through their services. Product names, prices, subtotals, and the cart total are
-looked up and calculated by the cart service; client-submitted prices and totals
-are ignored. Quantities must be positive integers. Cart validation does not
-reserve stock.
-
-### Order Service
-
-| Method   | Route         | Description                |
-| -------- | ------------- | -------------------------- |
-| `GET`    | `/health`     | Health check               |
-| `GET`    | `/orders`     | List orders                |
-| `GET`    | `/orders/:id` | Retrieve an order          |
-| `POST`   | `/orders`     | Place an order from a cart |
-| `PUT`    | `/orders`     | Update the order status    |
-| `DELETE` | `/orders`     | Delete a test order        |
-
-Example order request:
-
-```json
-{
-  "customerId": "cust-001",
-  "cartId": "cart-001"
-}
-```
-
-Update an order with `PUT /orders` and a body such as
-`{"id":"ord-001","status":"CANCELLED"}`. Delete one with `DELETE /orders`
-and `{"id":"ord-001"}`.
-
-Order creation verifies the customer and cart, confirms the cart belongs to
-that customer, and re-fetches each product from Product Catalog to validate
-product identities and calculate authoritative prices and totals. It then
-reserves all items in Inventory before storing the new `PENDING` order.
-Inventory is the source of stock availability; Product Catalog's
-`stockQuantity` is no longer used to accept or reject an order.
-
-Only pending orders can move to `CONFIRMED`, `CANCELLED`, or `FAILED`.
-Confirmation commits the Inventory reservation and deducts stock. Cancellation
-or failure releases the reservation. Order status changes only after Inventory
-confirms the operation; dependency failures leave the order pending for retry.
-Repeated updates to the same status are safe. Completed orders cannot change
-to another status or reopen. Concurrent status updates and deletion of the
-same order return a conflict while one operation is running.
-
-Deleting a pending test order releases its stock first. Deleting a completed
-test order removes only that record and does not restock committed quantities.
-If the reservation is missing, a pending order's status change or deletion
-fails instead of silently accepting an inconsistent stock state.
-
-### Payment Service
-
-| Method  | Route              | Description                            |
-| ------- | ------------------ | -------------------------------------- |
-| `GET`   | `/health`          | Health check                           |
-| `GET`   | `/payments`        | List simulated payments                |
-| `GET`   | `/payments/:id`    | Retrieve a payment                     |
-| `POST`  | `/payments`        | Create a payment for an existing order |
-| `PATCH` | `/payments/status` | Update payment status                  |
-
-Create a payment by sending only the order ID:
-
-```json
-{
-  "orderId": "ord-001"
-}
-```
-
-Payment Service retrieves the order and uses its `totalAmount`; clients cannot
-choose the payment amount. Only one payment may be created per order. Payments
-start in `PENDING`; updating a payment to `PAID` confirms its order through
-Order Service, which commits reserved stock. Updating it to `FAILED` fails a
-pending order through Order Service, which releases stock. An already cancelled
-or failed order can record a failed payment without changing its order status.
-A confirmed order cannot accept a failed payment. Payment and order statuses
-remain separate fields; completed payment statuses cannot be changed.
-If the order/stock operation fails, payment remains pending for retry.
-Update payment status with `PATCH /payments/status` and a body such as
-`{"id":"pay-001","status":"PAID"}`.
-
-### Inventory Service
-
-| Method  | Route                                      | Description                                  |
-| ------- | ------------------------------------------ | -------------------------------------------- |
-| `GET`   | `/health`                                  | Health check                                 |
-| `GET`   | `/inventory`                               | List stock records                           |
-| `GET`   | `/inventory/:productId`                    | Retrieve stock for a product                 |
-| `POST`  | `/inventory`                               | Create stock for an existing catalog product |
-| `PATCH` | `/inventory`                               | Update stock on hand                         |
-| `POST`  | `/inventory/reservations`                  | Reserve stock for an order reference         |
-| `GET`   | `/inventory/reservations/:orderId`         | Retrieve a reservation                       |
-| `POST`  | `/inventory/reservations/:orderId/commit`  | Deduct reserved stock                        |
-| `POST`  | `/inventory/reservations/:orderId/release` | Release reserved stock                       |
-
-Inventory starts with 10 records (`inv-001` through `inv-010`) matching the
-catalog's product IDs and initial stock quantities. Each record contains
-`id`, `productId`, `stockQuantity`, `reservedQuantity`, and `updatedAt`.
-Responses also calculate `availableQuantity` as stock on hand minus reservations.
-It also starts with reservations for the pending sample orders `ord-002`,
-`ord-004`, `ord-007`, and `ord-010`. Initially, `prod-001` has 6 reserved units
-and 19 available, and `prod-002` has 1 reserved unit and 14 available.
-Historical confirmed sample orders are already accounted for in stock on hand.
-
-Create stock after creating the corresponding product in Product Catalog:
-
-```json
-{
-  "id": "inv-011",
-  "productId": "prod-011",
-  "stockQuantity": 20
-}
-```
-
-Stock quantities must be non-negative safe integers. IDs and product IDs must
-be unique. `PATCH /inventory` requires `productId` and `stockQuantity`, and
-stock cannot be reduced below the quantity currently reserved. Reserved and
-available quantities are maintained by the server.
-
-### Notification Service
-
-| Method  | Route                   | Description                  |
-| ------- | ----------------------- | ---------------------------- |
-| `GET`   | `/health`               | Health check                 |
-| `GET`   | `/notifications`        | List notifications           |
-| `GET`   | `/notifications/:id`    | Retrieve a notification      |
-| `POST`  | `/notifications`        | Create an order confirmation |
-| `PATCH` | `/notifications/status` | Update notification status   |
-
-Update a notification with `PATCH /notifications/status` and a body such as
-`{"id":"notif-...","status":"SENT"}`.
-
-### Authentication Service
-
-| Method | Route        | Description                      |
-| ------ | ------------ | -------------------------------- |
-| `GET`  | `/health`    | Health check                     |
-| `POST` | `/register`  | Register an account              |
-| `POST` | `/login`     | Authenticate an account          |
-| `GET`  | `/users/:id` | Retrieve a non-sensitive profile |
-
-Authentication currently has no user update or delete endpoints.
-
-Example reservation request:
-
-```json
-{
-  "orderId": "ord-001",
-  "items": [
-    { "productId": "prod-001", "quantity": 2 },
-    { "productId": "prod-002", "quantity": 1 }
-  ]
-}
-```
-
-Reservations require a non-empty order reference and positive safe integer
-quantities. Repeated product IDs are merged. All items must have stock records
-and sufficient available stock; a failed request reserves nothing. Availability
-checking and mutation occur synchronously in one service process to prevent
-concurrent requests from reserving the same units.
-
-Reservations start in `RESERVED`. Commit changes the status to `COMMITTED` and
-reduces both stock on hand and reserved quantities. Release changes the status
-to `RELEASED` and reduces only reserved quantities. Repeating the same action
-is safe; a completed reservation cannot change to the other completed status.
-Retrying reservation creation with the same order ID and equivalent items
-returns the existing reserved or committed reservation. Different items, or
-attempting to reuse a released order reference, return a conflict.
-
-Inventory accepts the caller's order reference without fetching Order Service.
-Order Service calls reservation endpoints automatically during checkout and
-status updates. Payment communicates with Order, which owns the order status
-and coordinates committing or releasing stock. Inventory changes do not
-synchronize Product Catalog's stock field.
-
-Inventory HTTP operations use a five-second timeout and one retry on network
-or server failure, with the same order ID to avoid duplicate mutations. An
-unsuccessful checkout with an ambiguous reservation result attempts to release
-its stock; if cleanup also fails, the order ID is logged for reconciliation.
-These are separate HTTP operations, not a distributed transaction.
-
-Stock guarantees apply to one running Inventory instance with in-memory data.
-Restarting just one service can leave its state inconsistent with the others.
-For a clean classroom demonstration, restart the full stack together to restore
-matching sample orders, payments, and inventory reservations.
-
-## Integrated Inventory Workflow
-
-With all services running, use Postman to:
-
-1. `GET /inventory/prod-001` on port 3006 and note stock and reservations.
-2. `POST /orders` on port 3004 with `customerId: "cust-001"` and
-   `cartId: "cart-001"`. Save the returned order ID. Two units are reserved.
-3. `POST /payments` on port 3005 with that `orderId`. Save the payment ID.
-4. `PATCH /payments/status` with `{"id":"<payment-id>","status":"PAID"}`. The order becomes
-   confirmed, stock on hand falls by two, and its reservation is committed.
-5. Repeat with a new order and `{"status":"FAILED"}` to verify stock is
-   released without reducing stock on hand.
-6. Create another order and `PUT /orders` with
-   `{"id":"<order-id>","status":"CANCELLED"}`
-   to verify cancellation also releases stock.
-
-Run the connected Cart/Order/Inventory/Payment tests with `npm test` from
-`order-service` after installing dependencies in those service folders.
-
-Successful responses use a JSON envelope with `success`, `data` (when applicable), and `message`. Product IDs are the catalog's identifiers for use by other services; customer IDs identify customer profiles.
+The automated suites cover Auth, Cart, Inventory, Order, Payment, and
+Notification integration. Product and Customer endpoint CRUD/error checks
+should also be run manually using the Postman steps above.
+
+## Runtime notes
+
+- All services keep data in memory. Changes and generated resources disappear
+  when the owning service restarts.
+- Inventory starts with reservations for pending sample orders `ord-002`,
+  `ord-004`, `ord-007`, and `ord-010`. `prod-001` begins with six reserved
+  units; account for this when comparing available stock.
+- Payment starts with ten sample payment records. Notification Service starts
+  with no notifications.
+- Use `docker compose up --build` after code changes. To run detached, use
+  `docker compose up -d --build`; view logs with `docker compose logs -f`;
+  stop the stack with `docker compose down`.
+- Services call one another using Compose service URLs. For local standalone
+  execution, set the corresponding `*_SERVICE_URL` environment variables when
+  defaults are not appropriate.
+
+The older standalone guide path now redirects here:
+[docs/testing-guide.md](docs/testing-guide.md).

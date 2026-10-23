@@ -11,6 +11,8 @@ services:
       context: ./customer-service
       dockerfile: dockerfile
     init: true
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:3008
     ports:
       - "3002:3002"
 
@@ -50,8 +52,10 @@ services:
       dockerfile: dockerfile
     environment:
       ORDER_SERVICE_URL: http://order-service:3004
+      NOTIFICATION_SERVICE_URL: http://notification-service:3007
     depends_on:
       - order-service
+      - notification-service
     ports:
       - "3005:3005"
 
@@ -72,8 +76,10 @@ services:
       dockerfile: dockerfile
     environment:
       CUSTOMER_SERVICE_URL: http://customer-service:3002
+      ORDER_SERVICE_URL: http://order-service:3004
     depends_on:
       - customer-service
+      - order-service
     ports:
       - "3007:3007"
 

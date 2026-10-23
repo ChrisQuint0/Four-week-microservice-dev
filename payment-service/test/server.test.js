@@ -24,6 +24,7 @@ const orders = {
     id: "ord-test-paid",
     totalAmount: 1198,
     status: "PENDING",
+    customerId: "cust-001",
   },
   "ord-002": {
     id: "ord-002",
@@ -62,9 +63,13 @@ function close(server) {
 
 describe("Payment Service integration", () => {
   let orderServer;
+  let notificationServer;
   let paymentServer;
   let paymentUrl;
   let failOrderUpdates = false;
+  let failNotificationRequests = false;
+  const notifications = new Map();
+  let notificationRequestCount = 0;
 
   before(async () => {
     const orderApp = express();
@@ -101,17 +106,47 @@ describe("Payment Service integration", () => {
       return response.json({ success: true, data: order });
     });
 
+    const notificationApp = express();
+    notificationApp.use(express.json());
+    notificationApp.post("/notifications", (request, response) => {
+      notificationRequestCount += 1;
+      if (failNotificationRequests) {
+        return response.status(503).json({ success: false });
+      }
+
+      const { customerId, orderId } = request.body;
+      let notification = notifications.get(orderId);
+      const status = notification ? 200 : 201;
+      if (!notification) {
+        notification = {
+          id: `notif-${orderId}`,
+          customerId,
+          orderId,
+          type: "ORDER_CONFIRMATION",
+          status: "CREATED",
+        };
+        notifications.set(orderId, notification);
+      }
+      return response.status(status).json({ success: true, data: notification });
+    });
+
     orderServer = await listen(orderApp);
+    notificationServer = await listen(notificationApp);
     paymentServer = await listen(
       createApp({
         orderServiceUrl: `http://127.0.0.1:${orderServer.address().port}`,
+        notificationServiceUrl: `http://127.0.0.1:${notificationServer.address().port}`,
       }),
     );
     paymentUrl = `http://127.0.0.1:${paymentServer.address().port}`;
   });
 
   after(async () => {
-    await Promise.all([close(paymentServer), close(orderServer)]);
+    await Promise.all([
+      close(paymentServer),
+      close(notificationServer),
+      close(orderServer),
+    ]);
   });
 
   it("serves a health check and starts with 10 sample payments", async () => {
@@ -214,25 +249,43 @@ describe("Payment Service integration", () => {
       (error) => error.response.status === 503,
     );
     failOrderUpdates = false;
+    failNotificationRequests = true;
+    await assert.rejects(
+      axios.patch(
+        `${paymentUrl}/payments/status`,
+        { id: paymentId, status: "PAID" },
+      ),
+      (error) => error.response.status === 503,
+    );
 
-    const stillPending = await axios.get(
+    const pendingAfterNotificationFailure = await axios.get(
       `${paymentUrl}/payments/${paymentId}`,
     );
-    assert.equal(stillPending.data.data.status, "PENDING");
-    assert.equal(orders["ord-test-paid"].status, "PENDING");
+    assert.equal(pendingAfterNotificationFailure.data.data.status, "PENDING");
+    assert.equal(orders["ord-test-paid"].status, "CONFIRMED");
 
+    failNotificationRequests = false;
     const updated = await axios.patch(
       `${paymentUrl}/payments/status`,
       { id: paymentId, status: "PAID" },
     );
     assert.equal(updated.data.data.status, "PAID");
     assert.equal(orders["ord-test-paid"].status, "CONFIRMED");
+    assert.equal(notificationRequestCount, 2);
+    assert.deepEqual(notifications.get("ord-test-paid"), {
+      id: "notif-ord-test-paid",
+      customerId: "cust-001",
+      orderId: "ord-test-paid",
+      type: "ORDER_CONFIRMATION",
+      status: "CREATED",
+    });
 
     const unchanged = await axios.patch(
       `${paymentUrl}/payments/status`,
       { id: paymentId, status: "PAID" },
     );
     assert.equal(unchanged.data.data.status, "PAID");
+    assert.equal(notificationRequestCount, 2);
 
     await assert.rejects(
       axios.patch(`${paymentUrl}/payments/status`, {

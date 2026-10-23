@@ -1,7 +1,10 @@
 const express = require("express");
+const axios = require("axios");
 
 const app = express();
 const port = process.env.PORT || 3002;
+const authServiceUrl = process.env.AUTH_SERVICE_URL || "http://localhost:3008";
+const requestTimeout = 5000;
 
 app.use(express.json());
 
@@ -72,6 +75,15 @@ function isValidCustomer(customer) {
   );
 }
 
+function nextCustomerId() {
+  const highestId = customers.reduce((highest, customer) => {
+    const match = /^cust-(\d+)$/.exec(customer.id);
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0);
+
+  return `cust-${String(highestId + 1).padStart(3, "0")}`;
+}
+
 //Checks service health
 app.get("/health", (request, response) => {
   response.json({ success: true, message: "Customer service is healthy" });
@@ -104,14 +116,28 @@ app.get("/customers/:id", (request, response) => {
   });
 });
 
-//Adds new customers
-app.post("/customers", (request, response) => {
-  const customer = request.body;
+function createCustomer(request, response) {
+  const body = request.body || {};
+  if (
+    Object.hasOwn(body, "id") &&
+    (typeof body.id !== "string" || body.id.trim().length === 0)
+  ) {
+    return response.status(400).json({
+      success: false,
+      message: "Customer id must be a non-empty string when provided",
+    });
+  }
+
+  const customer = {
+    id: body.id ? body.id.trim() : nextCustomerId(),
+    name: body.name,
+    email: body.email,
+  };
 
   if (!isValidCustomer(customer)) {
     return response.status(400).json({
       success: false,
-      message: "Customer must include a non-empty id, name, and valid email",
+      message: "Customer must include a non-empty name and valid email",
     });
   }
 
@@ -128,15 +154,31 @@ app.post("/customers", (request, response) => {
     data: customer,
     message: "Customer created successfully",
   });
+}
+
+// Customer records are created by Auth Service during registration.
+app.post("/internal/customers", createCustomer);
+
+app.post("/customers", (request, response) => {
+  return response.status(405).json({
+    success: false,
+    message: "Customers must be created through Authentication Service",
+  });
 });
 
 //Updates a customer
 app.put("/customers", (request, response) => {
   const body = request.body || {};
-  if (typeof body.id !== "string" || body.id.trim().length === 0) {
+  const allowedFields = new Set(["id", "name", "email"]);
+  if (
+    typeof body.id !== "string" ||
+    body.id.trim().length === 0 ||
+    Object.keys(body).some((field) => !allowedFields.has(field)) ||
+    (!Object.hasOwn(body, "name") && !Object.hasOwn(body, "email"))
+  ) {
     return response.status(400).json({
       success: false,
-      message: "Customer update must include a non-empty id",
+      message: "Customer update must include only id, name, or email fields",
     });
   }
 
@@ -150,11 +192,9 @@ app.put("/customers", (request, response) => {
     });
   }
 
-  const customer = {
-    ...customers[customerIndex],
-    ...body,
-    id,
-  };
+  const customer = { ...customers[customerIndex] };
+  if (Object.hasOwn(body, "name")) customer.name = body.name;
+  if (Object.hasOwn(body, "email")) customer.email = body.email;
 
   if (!isValidCustomer(customer)) {
     return response.status(400).json({
@@ -171,8 +211,8 @@ app.put("/customers", (request, response) => {
   });
 });
 
-//Deletes a customer
-app.delete("/customers", (request, response) => {
+// Deletes a customer and its linked authentication records.
+app.delete("/customers", async (request, response) => {
   const body = request.body || {};
   if (
     Object.keys(body).length !== 1 ||
@@ -193,6 +233,33 @@ app.delete("/customers", (request, response) => {
     return response.status(404).json({
       success: false,
       message: "Customer not found",
+    });
+  }
+
+  try {
+    const authResponse = await axios.delete(
+      `${authServiceUrl}/internal/users/customer/${encodeURIComponent(body.id.trim())}`,
+      { timeout: requestTimeout },
+    );
+    if (authResponse.data?.success !== true) {
+      return response.status(502).json({
+        success: false,
+        message: "Authentication Service returned an invalid response",
+      });
+    }
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      return response
+        .status(error.response?.status === undefined ? 503 : 502)
+        .json({
+          success: false,
+          message: "Authentication Service is unavailable",
+        });
+    }
+    console.error("Unexpected authentication cascade error:", error);
+    return response.status(500).json({
+      success: false,
+      message: "Customer deletion could not be completed",
     });
   }
 

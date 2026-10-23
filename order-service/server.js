@@ -285,35 +285,44 @@ function createApp({
   });
 
   app.post("/orders", async (request, response) => {
-    const { customerId, cartId } = request.body || {};
-    if (
-      typeof customerId !== "string" ||
-      customerId.trim().length === 0 ||
-      typeof cartId !== "string" ||
-      cartId.trim().length === 0
-    ) {
+    const { cartId } = request.body || {};
+    if (typeof cartId !== "string" || cartId.trim().length === 0) {
       return response.status(400).json({
         success: false,
-        message: "Order must include a non-empty customerId and cartId",
+        message: "Order must include a non-empty cartId",
       });
     }
 
-    const normalizedCustomerId = customerId.trim();
     const normalizedCartId = cartId.trim();
 
-    let customer;
     let cart;
     try {
-      [customer, cart] = await Promise.all([
-        fetchServiceResource(
-          `${customerServiceUrl}/customers/${encodeURIComponent(normalizedCustomerId)}`,
-          "Customer",
-        ),
-        fetchServiceResource(
-          `${cartServiceUrl}/cart/${encodeURIComponent(normalizedCartId)}`,
-          "Cart",
-        ),
-      ]);
+      cart = await fetchServiceResource(
+        `${cartServiceUrl}/cart/${encodeURIComponent(normalizedCartId)}`,
+        "Cart",
+      );
+    } catch (error) {
+      return handleServiceError(error, response);
+    }
+
+    if (
+      cart.id !== normalizedCartId ||
+      typeof cart.customerId !== "string" ||
+      cart.customerId.trim().length === 0
+    ) {
+      return response.status(502).json({
+        success: false,
+        message: "Cart service returned an invalid cart",
+      });
+    }
+
+    const normalizedCustomerId = cart.customerId.trim();
+    let customer;
+    try {
+      customer = await fetchServiceResource(
+        `${customerServiceUrl}/customers/${encodeURIComponent(normalizedCustomerId)}`,
+        "Customer",
+      );
     } catch (error) {
       return handleServiceError(error, response);
     }
@@ -326,16 +335,6 @@ function createApp({
       return response.status(502).json({
         success: false,
         message: "Customer service returned an invalid customer",
-      });
-    }
-
-    if (
-      cart.id !== normalizedCartId ||
-      cart.customerId !== normalizedCustomerId
-    ) {
-      return response.status(422).json({
-        success: false,
-        message: "Cart does not belong to the specified customer",
       });
     }
 
@@ -472,7 +471,6 @@ function createApp({
     }
 
     // TODO: Submit this order ID and total to the Payment service.
-    // TODO: Notify the customer with the customer and order IDs.
     orders.push(order);
     return response.status(201).json({
       success: true,

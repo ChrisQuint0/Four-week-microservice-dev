@@ -175,34 +175,22 @@ describe("Order Service integration", () => {
 
   it("rejects incomplete order requests", async () => {
     await assert.rejects(
-      axios.post(`${orderUrl}/orders`, { customerId: "cust-001" }),
+      axios.post(`${orderUrl}/orders`, {}),
       (error) => error.response.status === 400,
     );
   });
 
-  it("rejects unknown customers and carts", async () => {
+  it("rejects carts with unknown customers and unknown carts", async () => {
     await assert.rejects(
       axios.post(`${orderUrl}/orders`, {
-        customerId: "cust-missing",
-        cartId: "cart-001",
-      }),
-      (error) => error.response.status === 422,
-    );
-
-    await assert.rejects(
-      axios.post(`${orderUrl}/orders`, {
-        customerId: "cust-001",
-        cartId: "cart-missing",
-      }),
-      (error) => error.response.status === 422,
-    );
-  });
-
-  it("rejects carts belonging to a different customer", async () => {
-    await assert.rejects(
-      axios.post(`${orderUrl}/orders`, {
-        customerId: "cust-001",
         cartId: "cart-other-customer",
+      }),
+      (error) => error.response.status === 422,
+    );
+
+    await assert.rejects(
+      axios.post(`${orderUrl}/orders`, {
+        cartId: "cart-missing",
       }),
       (error) => error.response.status === 422,
     );
@@ -211,15 +199,12 @@ describe("Order Service integration", () => {
   it("rejects unknown products and insufficient stock", async () => {
     await assert.rejects(
       axios.post(`${orderUrl}/orders`, {
-        customerId: "cust-001",
         cartId: "cart-unknown-product",
       }),
       (error) => error.response.status === 422,
     );
-
     await assert.rejects(
       axios.post(`${orderUrl}/orders`, {
-        customerId: "cust-001",
         cartId: "cart-insufficient-stock",
       }),
       (error) => error.response.status === 409,
@@ -228,7 +213,6 @@ describe("Order Service integration", () => {
 
   it("creates an order with authoritative catalog prices and a pending status", async () => {
     const response = await axios.post(`${orderUrl}/orders`, {
-      customerId: "cust-001",
       cartId: "cart-001",
       totalAmount: 1,
       status: "CONFIRMED",

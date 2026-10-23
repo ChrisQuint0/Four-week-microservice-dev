@@ -6,6 +6,7 @@ const { createApp: createOrderApp } = require("../server");
 const { createApp: createInventoryApp } = require("../../inventory-service/server");
 const { createApp: createCartApp } = require("../../cart-service/server");
 const { createApp: createPaymentApp } = require("../../payment-service/server");
+const { createApp: createNotificationApp } = require("../../notification-service/server");
 
 function listen(app) {
   return new Promise((resolve) => {
@@ -42,10 +43,14 @@ async function withPlatform(run) {
     const productServiceUrl = await start(productApp);
     const customerApp = express();
     customerApp.get("/customers/:id", (request, response) => {
-      const valid = request.params.id === "cust-001";
+      const valid = /^cust-00[1-9]$|^cust-010$/.test(request.params.id);
       return response.status(valid ? 200 : 404).json({
         success: valid,
-        data: { id: "cust-001", name: "Demo", email: "demo@example.test" },
+        data: {
+          id: request.params.id,
+          name: "Demo",
+          email: "demo@example.test",
+        },
       });
     });
     const customerServiceUrl = await start(customerApp);
@@ -81,7 +86,14 @@ async function withPlatform(run) {
     const orderServiceUrl = await start(createOrderApp({
       productServiceUrl, customerServiceUrl, cartServiceUrl, inventoryServiceUrl,
     }));
-    const paymentServiceUrl = await start(createPaymentApp({ orderServiceUrl }));
+    const notificationServiceUrl = await start(createNotificationApp({
+      customerServiceUrl,
+      orderServiceUrl,
+    }));
+    const paymentServiceUrl = await start(createPaymentApp({
+      orderServiceUrl,
+      notificationServiceUrl,
+    }));
     const requestOptions = { validateStatus: () => true };
     const post = (url, body = {}) => axios.post(url, body, requestOptions);
     const put = (orderId, status) => axios.put(
@@ -91,22 +103,26 @@ async function withPlatform(run) {
       (await axios.get(`${inventoryServiceUrl}/inventory/${productId}`)).data.data;
     const order = async (orderId) =>
       (await axios.get(`${orderServiceUrl}/orders/${orderId}`)).data.data;
-    const checkout = async (cartId = "cart-001") => post(`${orderServiceUrl}/orders`, {
-      customerId: "cust-001", cartId,
-    });
+    const checkout = async (cartId = "cart-001") =>
+      post(`${orderServiceUrl}/orders`, { cartId });
     const payment = async (orderId) =>
       (await post(`${paymentServiceUrl}/payments`, { orderId })).data.data;
     const paymentStatus = (paymentId, status) => axios.patch(
       `${paymentServiceUrl}/payments/status`, { id: paymentId, status }, requestOptions,
     );
-    const cart = async (id, items) => {
-      assert.equal((await post(`${cartServiceUrl}/cart`, {
-        id, customerId: "cust-001", items,
-      })).status, 201);
+    const notifications = async () =>
+      (await axios.get(`${notificationServiceUrl}/notifications`)).data.data;
+    const cart = async (items) => {
+      const created = await post(`${cartServiceUrl}/cart`, {
+        customerId: "cust-001", items,
+      });
+      assert.equal(created.status, 201);
+      return created.data.data.id;
     };
     await run({
       control, stock, order, checkout, payment, paymentStatus, cart, put, post,
-      inventoryServiceUrl, orderServiceUrl, paymentServiceUrl, requestOptions,
+      inventoryServiceUrl, orderServiceUrl, paymentServiceUrl,
+      notificationServiceUrl, notifications, requestOptions,
     });
   } finally {
     await Promise.all(servers.map(close));
@@ -115,7 +131,9 @@ async function withPlatform(run) {
 
 describe("Order, Inventory, Cart, and Payment workflow", () => {
   it("reserves at checkout and commits once after successful payment", async () => {
-    await withPlatform(async ({ stock, checkout, payment, paymentStatus, order, put }) => {
+    await withPlatform(async ({
+      stock, checkout, payment, paymentStatus, order, put, notifications,
+    }) => {
       const baseline = await stock();
       const created = await checkout();
       assert.equal(created.status, 201);
@@ -128,7 +146,14 @@ describe("Order, Inventory, Cart, and Payment workflow", () => {
       assert.equal((await order(orderId)).status, "CONFIRMED");
       assert.equal((await stock()).stockQuantity, baseline.stockQuantity - 2);
       assert.equal((await stock()).reservedQuantity, baseline.reservedQuantity);
+      const createdNotifications = await notifications();
+      assert.equal(createdNotifications.length, 1);
+      assert.equal(createdNotifications[0].customerId, "cust-001");
+      assert.equal(createdNotifications[0].orderId, orderId);
+      assert.equal(createdNotifications[0].type, "ORDER_CONFIRMATION");
+      assert.equal(createdNotifications[0].status, "CREATED");
       await paymentStatus(pay.id, "PAID");
+      assert.equal((await notifications()).length, 1);
       await put(orderId, "CONFIRMED");
       assert.equal((await stock()).stockQuantity, baseline.stockQuantity - 2);
       assert.equal((await put(orderId, "CANCELLED")).status, 409);
@@ -177,24 +202,24 @@ describe("Order, Inventory, Cart, and Payment workflow", () => {
 
   it("uses Inventory availability and rejects multi-item shortages without partial reservations", async () => {
     await withPlatform(async ({ stock, cart, checkout, orderServiceUrl }) => {
-      await cart("cart-short", [
+      const cartId = await cart([
         { productId: "prod-001", quantity: 1 },
         { productId: "prod-002", quantity: 15 },
       ]);
       const baseline = await stock();
-      assert.equal((await checkout("cart-short")).status, 409);
+      assert.equal((await checkout(cartId)).status, 409);
       assert.equal((await stock()).reservedQuantity, baseline.reservedQuantity);
       assert.equal((await axios.get(`${orderServiceUrl}/orders`)).data.data.length, 10);
-      await cart("cart-no-stock", [{ productId: "prod-011", quantity: 1 }]);
-      assert.equal((await checkout("cart-no-stock")).status, 422);
+      const cartWithoutStock = await cart([{ productId: "prod-011", quantity: 1 }]);
+      assert.equal((await checkout(cartWithoutStock)).status, 422);
     });
   });
 
   it("prevents simultaneous checkouts from overselling", async () => {
     await withPlatform(async ({ stock, cart, checkout }) => {
-      await cart("cart-race", [{ productId: "prod-001", quantity: 12 }]);
+      const cartId = await cart([{ productId: "prod-001", quantity: 12 }]);
       const baseline = await stock();
-      const attempts = await Promise.all([checkout("cart-race"), checkout("cart-race")]);
+      const attempts = await Promise.all([checkout(cartId), checkout(cartId)]);
       assert.deepEqual(attempts.map((item) => item.status).sort(), [201, 409]);
       assert.equal((await stock()).reservedQuantity, baseline.reservedQuantity + 12);
     });

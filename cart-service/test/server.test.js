@@ -96,7 +96,6 @@ describe("Shopping Cart Service integration", () => {
 
   it("creates a cart with catalog-enriched prices and totals", async () => {
     const response = await axios.post(`${cartUrl}/cart`, {
-      id: "test-cart-001",
       customerId: "cust-001",
       items: [
         { productId: "prod-001", quantity: 2, unitPrice: 0 },
@@ -106,6 +105,12 @@ describe("Shopping Cart Service integration", () => {
     });
 
     assert.equal(response.status, 201);
+    const createdCartId = response.data.data.id;
+    assert.match(
+      createdCartId,
+      /^cart-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    assert.notEqual(createdCartId, "test-cart-001");
     assert.equal(response.data.data.totalAmount, 2048);
     assert.deepEqual(response.data.data.items, [
       {
@@ -124,14 +129,13 @@ describe("Shopping Cart Service integration", () => {
       },
     ]);
 
-    const retrieved = await axios.get(`${cartUrl}/cart/test-cart-001`);
+    const retrieved = await axios.get(`${cartUrl}/cart/${createdCartId}`);
     assert.equal(retrieved.data.data.updatedAt, response.data.data.updatedAt);
   });
 
   it("rejects unknown customers and products", async () => {
     await assert.rejects(
       axios.post(`${cartUrl}/cart`, {
-        id: "cart-unknown-customer",
         customerId: "cust-missing",
         items: [{ productId: "prod-001", quantity: 1 }],
       }),
@@ -140,7 +144,6 @@ describe("Shopping Cart Service integration", () => {
 
     await assert.rejects(
       axios.post(`${cartUrl}/cart`, {
-        id: "cart-unknown-product",
         customerId: "cust-001",
         items: [{ productId: "prod-missing", quantity: 1 }],
       }),
@@ -151,16 +154,30 @@ describe("Shopping Cart Service integration", () => {
   it("rejects nonpositive and invalid quantities", async () => {
     await assert.rejects(
       axios.post(`${cartUrl}/cart`, {
-        id: "cart-invalid",
         customerId: "cust-001",
         items: [{ productId: "prod-001", quantity: 0 }],
+      }),
+      (error) => error.response.status === 400,
+    );
+
+    await assert.rejects(
+      axios.post(`${cartUrl}/cart`, {
+        id: "client-cart-id",
+        customerId: "cust-001",
+        items: [{ productId: "prod-001", quantity: 1 }],
       }),
       (error) => error.response.status === 400,
     );
   });
 
   it("adds items by merging quantities and supports cart updates", async () => {
-    const added = await     axios.post(`${cartUrl}/cart/test-cart-001/items`, {
+    const created = await axios.post(`${cartUrl}/cart`, {
+      customerId: "cust-001",
+      items: [{ productId: "prod-001", quantity: 2 }],
+    });
+    const cartId = created.data.data.id;
+    const added = await axios.post(`${cartUrl}/cart/items`, {
+      id: cartId,
       productId: "prod-001",
       quantity: 3,
     });
@@ -168,21 +185,45 @@ describe("Shopping Cart Service integration", () => {
     assert.equal(added.data.data.items[0].subtotal, 2995);
 
     const updated = await axios.put(`${cartUrl}/cart`, {
-      id: "test-cart-001",
+      id: cartId,
       items: [{ productId: "prod-002", quantity: 2 }],
     });
     assert.equal(updated.data.data.customerId, "cust-001");
     assert.equal(updated.data.data.totalAmount, 1700);
   });
 
-  it("deletes carts and returns not found for missing carts", async () => {
-    const deleted = await axios.delete(`${cartUrl}/cart`, {
-      data: { id: "test-cart-001" },
-    });
-    assert.equal(deleted.data.data.id, "test-cart-001");
+  it("requires a cart id in the request body and returns not found for unknown carts", async () => {
+    await assert.rejects(
+      axios.post(`${cartUrl}/cart/items`, {
+        productId: "prod-001",
+        quantity: 1,
+      }),
+      (error) => error.response.status === 400,
+    );
 
     await assert.rejects(
-      axios.get(`${cartUrl}/cart/test-cart-001`),
+      axios.post(`${cartUrl}/cart/items`, {
+        id: "missing-cart",
+        productId: "prod-001",
+        quantity: 1,
+      }),
+      (error) => error.response.status === 404,
+    );
+  });
+
+  it("deletes carts and returns not found for missing carts", async () => {
+    const created = await axios.post(`${cartUrl}/cart`, {
+      customerId: "cust-001",
+      items: [{ productId: "prod-001", quantity: 1 }],
+    });
+    const cartId = created.data.data.id;
+    const deleted = await axios.delete(`${cartUrl}/cart`, {
+      data: { id: cartId },
+    });
+    assert.equal(deleted.data.data.id, cartId);
+
+    await assert.rejects(
+      axios.get(`${cartUrl}/cart/${cartId}`),
       (error) => error.response.status === 404,
     );
   });

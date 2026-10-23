@@ -7,6 +7,7 @@ const port = process.env.PORT || 3007;
 function createApp({
   customerServiceUrl = process.env.CUSTOMER_SERVICE_URL ||
     "http://localhost:3002",
+  orderServiceUrl = process.env.ORDER_SERVICE_URL || "http://localhost:3004",
 } = {}) {
   const app = express();
   const notifications = [];
@@ -45,52 +46,90 @@ function createApp({
       typeof orderId !== "string" ||
       !orderId.trim()
     ) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message:
-            "Notification must include a non-empty customerId and orderId",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Notification must include a non-empty customerId and orderId",
+      });
     }
+    const normalizedCustomerId = customerId.trim();
+    const normalizedOrderId = orderId.trim();
     try {
-      const result = await axios.get(
-        `${customerServiceUrl}/customers/${encodeURIComponent(customerId.trim())}`,
-        { timeout: 5000 },
-      );
+      const [customerResult, orderResult] = await Promise.all([
+        axios.get(
+          `${customerServiceUrl}/customers/${encodeURIComponent(normalizedCustomerId)}`,
+          { timeout: 5000 },
+        ),
+        axios.get(
+          `${orderServiceUrl}/orders/${encodeURIComponent(normalizedOrderId)}`,
+          { timeout: 5000 },
+        ),
+      ]);
       if (
-        result.data?.success !== true ||
-        result.data.data?.id !== customerId.trim()
+        customerResult.data?.success !== true ||
+        customerResult.data.data?.id !== normalizedCustomerId
       ) {
-        return res
-          .status(502)
-          .json({
+        return res.status(502).json({
+          success: false,
+          message: "Customer service returned an invalid customer",
+        });
+      }
+      const order = orderResult.data?.data;
+      if (
+        orderResult.data?.success !== true ||
+        order?.id !== normalizedOrderId ||
+        order.customerId !== normalizedCustomerId
+      ) {
+        return res.status(422).json({
+          success: false,
+          message: "Order does not belong to the specified customer",
+        });
+      }
+      if (order.status !== "CONFIRMED") {
+        return res.status(409).json({
+          success: false,
+          message: "Notification requires a confirmed order",
+        });
+      }
+      const existingNotification = notifications.find(
+        (item) => item.orderId === normalizedOrderId,
+      );
+      if (existingNotification) {
+        if (existingNotification.customerId !== normalizedCustomerId) {
+          return res.status(422).json({
             success: false,
-            message: "Customer service returned an invalid customer",
+            message: "Order already has a notification for a different customer",
           });
+        }
+        return res.status(200).json({
+          success: true,
+          data: existingNotification,
+          message: "Notification already exists for this order",
+        });
       }
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        if (error.response?.status === 404)
-          return res
-            .status(422)
-            .json({ success: false, message: "Customer not found" });
+        if (error.response?.status === 404) {
+          const failedUrl = error.config?.url || "";
+          const resource = failedUrl.includes("/orders/")
+            ? "Order"
+            : "Customer";
+          return res.status(422).json({
+            success: false,
+            message: `${resource} not found`,
+          });
+        }
         if (
           error.response?.status === undefined ||
           error.response?.status === 503
         )
-          return res
-            .status(503)
-            .json({
-              success: false,
-              message: "Customer service is unavailable",
-            });
-        return res
-          .status(502)
-          .json({
+          return res.status(503).json({
             success: false,
-            message: "Customer service returned an invalid response",
+            message: "Customer service is unavailable",
           });
+        return res.status(502).json({
+          success: false,
+          message: "Customer service returned an invalid response",
+        });
       }
       console.error("Unexpected notification service error:", error);
       return res
@@ -99,21 +138,19 @@ function createApp({
     }
     const notification = {
       id: `notif-${crypto.randomUUID()}`,
-      customerId: customerId.trim(),
-      orderId: orderId.trim(),
-      message: `Your order ${orderId.trim()} has been confirmed.`,
+      customerId: normalizedCustomerId,
+      orderId: normalizedOrderId,
+      message: `Your order ${normalizedOrderId} has been confirmed.`,
       type: "ORDER_CONFIRMATION",
       status: "CREATED",
       createdAt: new Date().toISOString(),
     };
     notifications.push(notification);
-    return res
-      .status(201)
-      .json({
-        success: true,
-        data: notification,
-        message: "Notification created successfully",
-      });
+    return res.status(201).json({
+      success: true,
+      data: notification,
+      message: "Notification created successfully",
+    });
   });
   app.patch("/notifications/status", (req, res) => {
     const body = req.body || {};
